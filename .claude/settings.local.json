@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -Pn '<br\\\\\\\\>' \"c:/Users/muham/OneDrive/Documents/GitHub/RocketV2/frontend/src/App.jsx\")"
+    ]
+  }
+}

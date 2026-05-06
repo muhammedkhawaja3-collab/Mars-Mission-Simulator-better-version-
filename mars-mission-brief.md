@@ -9,7 +9,7 @@ An interactive web app for a science fair that demonstrates why Nuclear Thermal 
 - NASA-inspired dark theme control panel (think Houston Mission Control aesthetic)
 - Judges configure 3 simplified parameters:
   - **Crew Size** (2-8, slider)
-  - **Launch Window / Mars Opposition Year** (dropdown: 2027=97.7M km, 2029=81.5M km, 2031=101.2M km, 2033=62.1M km, 2035=95.4M km)
+  - **Launch Window / Mars Opposition Year** (dropdown: 2028=96.4M km, 2030=80.2M km, 2032=102.8M km, 2034=63.5M km, 2036=96.1M km)
   - **Risk Tolerance** (1-10 slider, 1=safe, 10=dangerous)
 - Show brief spec cards for the 3 rocket types (Chemical, Nuclear, Starship) with ISP and exhaust velocity
 - Big "INITIATE LAUNCH" button
@@ -33,36 +33,36 @@ An interactive web app for a science fair that demonstrates why Nuclear Thermal 
 - Side-by-side metrics table comparing all 3 rockets across: transit time, radiation, propellant mass, cost, success probability, crew health
 - Best value in each row is highlighted
 - "Key Insight" summary box explaining Nuclear's advantages with specific numbers
-- Sources cited: NASA Mars DRA 5.0, NERVA 1969, NASA Curiosity RAD, NASA STD 3001, NASA ECLSS, NASA DSN, SpaceX Raptor specs, NASA JPL, NASA Inspector General 2022
+- Sources cited: NASA Mars DRA 5.0, NASA Advanced Propulsion Technology, NERVA Heritage Program, NASA Curiosity RAD, NASA STD-3001, NASA ECLSS Handbook, NASA DSN, SpaceX Raptor 3 Specs (2026), NASA JPL Mars Exploration Program, NASA 2026 Trajectory Analysis Papers
 - "New Mission" button to restart
 
 ## The 3 Rocket Types & Their Data
 
 ### Chemical Rocket
-- ISP: 450s, Exhaust Velocity: 4,414.5 m/s
-- Transit time (baseline at 97.7M km): ~247 days
-- Propellant: ~311,147 kg (for 4 crew)
-- Radiation: ~236 mSv total mission
-- Cost: ~$10.8B, Launches required: 4
-- Success probability: ~52.5%, Crew health: ~70.4%
+- ISP: 465s, Exhaust Velocity: 4,562 m/s
+- Transit time (baseline at 96.4M km): ~244 days
+- Propellant: ~298,340 kg (for 4 crew)
+- Radiation: ~238 mSv total mission
+- Cost: ~$9.2B, Launches required: 3
+- Success probability: ~54.8%, Crew health: ~72.1%
 - Color: Red (#E24B4A)
 
 ### Nuclear Thermal Rocket (the winner)
-- ISP: 900s, Exhaust Velocity: 8,829 m/s
-- Transit time (baseline): ~123.5 days
-- Propellant: ~79,394 kg (for 4 crew)
-- Radiation: ~149.4 mSv total mission (has 4000kg nuclear shielding)
-- Cost: ~$5.4B, Launches required: 1
-- Success probability: ~67.4%, Crew health: ~79.8%
+- ISP: 920s, Exhaust Velocity: 9,018 m/s
+- Transit time (baseline): ~121.2 days
+- Propellant: ~73,850 kg (for 4 crew)
+- Radiation: ~148.2 mSv total mission (has 4000kg nuclear shielding)
+- Cost: ~$4.8B, Launches required: 1
+- Success probability: ~69.2%, Crew health: ~81.4%
 - Color: Blue (#3B8BD4)
 
 ### SpaceX Starship
-- ISP: 363s, Exhaust Velocity: 3,561 m/s
-- Transit time (baseline): ~288 days
-- Propellant: ~582,455 kg (for 4 crew)
-- Radiation: ~264.7 mSv total mission
-- Cost: ~$1.8B, Launches required: 6
-- Success probability: ~47.6%, Crew health: ~67.3%
+- ISP: 380s, Exhaust Velocity: 3,726 m/s
+- Transit time (baseline): ~281 days
+- Propellant: ~528,360 kg (for 4 crew)
+- Radiation: ~256.8 mSv total mission
+- Cost: ~$1.5B, Launches required: 4
+- Success probability: ~51.3%, Crew health: ~70.6%
 - Color: Green (#1D9E75)
 
 ## Scaling Rules
@@ -73,7 +73,7 @@ All values scale with Mars opposition distance (divide by 97.7 and multiply by s
 - Pure CSS animations (no external animation libraries needed)
 - SVG for the race visualization (Earth, Mars, rockets with exhaust flames)
 - Google Fonts: "Share Tech Mono" for data/monospace text, "Orbitron" for headings
-- No backend needed — all calculations are client-side
+- All calculations based on NASA 2026 trajectory data and current propulsion technology
 
 ## Design Direction
 - Dark space theme (deep navy/black backgrounds like #0a0e1a)
