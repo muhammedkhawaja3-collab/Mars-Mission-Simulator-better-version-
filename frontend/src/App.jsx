@@ -840,6 +840,7 @@ export default function App() {
   // PWA Install prompt
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [showInstallBanner, setShowInstallBanner] = useState(false);
+  const [installInstruction, setInstallInstruction] = useState('Use your browser install menu to add Mars Mission Control.');
   const installPromptRef = useRef(false);
 
   // Player rocket
@@ -986,26 +987,40 @@ export default function App() {
 
   /* ── PWA Install Prompt ── */
   useEffect(() => {
-    // Check if user previously dismissed the install banner
     const isDismissed = localStorage.getItem('mars-mmc-install-dismissed');
     if (isDismissed) {
       installPromptRef.current = true;
       return;
     }
 
+    const ua = navigator.userAgent || '';
+    const isIOS = /iPhone|iPad|iPod/.test(ua) && !/CriOS|FxiOS|OPR|Edg|Chrome/.test(ua);
+    const isSafari = /Safari/.test(ua) && !/CriOS|FxiOS|OPR|Edg|Chrome/.test(ua);
+    const isAndroid = /Android/.test(ua);
+    const isChrome = /Chrome/.test(ua) && !/Edg|Edge|OPR|OPR|FxiOS|CriOS/.test(ua);
+    const isDesktopChrome = isChrome && !isAndroid;
+
+    let instruction = 'Use your browser install menu to add Mars Mission Control to your device.';
+    if (isIOS && isSafari) {
+      instruction = 'Tap the Share button then Add to Home Screen.';
+    } else if (isAndroid && isChrome) {
+      instruction = 'Tap the three dots menu then Add to Home Screen.';
+    } else if (isDesktopChrome) {
+      instruction = 'Click the install icon in your address bar or go to Chrome menu → Install Mars Mission Control.';
+    }
+
+    setInstallInstruction(instruction);
+
     const handleBeforeInstallPrompt = (e) => {
       e.preventDefault();
       setDeferredPrompt(e);
-      // Only show banner if loading has finished
-      if (!isLoading) {
-        setShowInstallBanner(true);
-      }
     };
 
     const handleAppInstalled = () => {
       setDeferredPrompt(null);
       setShowInstallBanner(false);
       localStorage.setItem('mars-mmc-install-dismissed', 'true');
+      installPromptRef.current = true;
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
@@ -1015,28 +1030,29 @@ export default function App() {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       window.removeEventListener('appinstalled', handleAppInstalled);
     };
-  }, [isLoading]);
+  }, []);
 
   /* ── Show install banner after loading finishes ── */
   useEffect(() => {
-    if (!isLoading && deferredPrompt && !installPromptRef.current) {
+    if (!isLoading && !installPromptRef.current) {
       const isDismissed = localStorage.getItem('mars-mmc-install-dismissed');
       if (!isDismissed) {
         setShowInstallBanner(true);
       }
     }
-  }, [isLoading, deferredPrompt]);
+  }, [isLoading]);
 
   const handleInstallClick = async () => {
-    if (!deferredPrompt) return;
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setDeferredPrompt(null);
+      }
+    }
     setShowInstallBanner(false);
     installPromptRef.current = true;
     localStorage.setItem('mars-mmc-install-dismissed', 'true');
-    if (outcome === 'accepted') {
-      setDeferredPrompt(null);
-    }
   };
 
   const handleDismissInstall = () => {
@@ -1238,13 +1254,16 @@ export default function App() {
         <div className="panel">
 
         {/* PWA INSTALL BANNER */}
-        {showInstallBanner && deferredPrompt && !isLoading && (
+        {showInstallBanner && !isLoading && (
           <div className="install-banner">
             <div className="install-banner-content">
-              <span className="install-banner-text">Install Mars Mission Control on your device for the best experience</span>
+              <div>
+                <div className="install-banner-text">Install Mars Mission Control on your device for the best experience.</div>
+                <div className="install-banner-text" style={{ marginTop: '8px', opacity: 0.9 }}>{installInstruction}</div>
+              </div>
               <div className="install-banner-actions">
                 <button className="install-banner-btn-install" onClick={handleInstallClick}>
-                  ⬇ INSTALL
+                  INSTALL
                 </button>
                 <button className="install-banner-btn-dismiss" onClick={handleDismissInstall}>
                   ✕
