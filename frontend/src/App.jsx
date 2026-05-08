@@ -82,7 +82,7 @@ const HAZARD_EVENTS = [
    ══════════════════════════════════════════════════════════ */
 const DISTANCES = { 2027:97.7, 2029:81.5, 2031:101.2, 2033:62.1, 2035:95.4 };
 const RAD_RATE  = 1.3;   // mSv/day — Curiosity RAD, Zeitlin et al. Science 2013
-const RACE_MS   = 20000;
+const RACE_MS   = 60000;
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 // Transit calibrated to NASA anchors (verified against DRA 5.0 and Borowski AIAA-2012-5144)
@@ -275,6 +275,7 @@ const scaleRocket = (base, crewSize, distance) => {
 
 const METRICS = [
   { key:'transit',      label:'Transit Time',                         unit:'days',  lo:true,  src:'NASA DRA 5.0 / Borowski AIAA-2012-5144' },
+  { key:'avgVelocity',  label:'Avg Cruise Speed',                     unit:'km/s',  lo:false, src:'Distance ÷ transit time · actual travel speed' },
   { key:'radiation',    label:'Radiation Dose (GCR)',                 unit:'mSv',   lo:true,  src:'Curiosity RAD · Zeitlin et al. Science 2013' },
   { key:'careerRadPct', label:'Career Rad. Limit Used',               unit:'%',     lo:true,  src:'NASA STD-3001 Rev C 2023 · 600 mSv limit' },
   { key:'boneLossPct',  label:'Hip Bone Density Loss',                unit:'%',     lo:true,  src:'Leblanc et al. 2007, Osteoporosis Intl (0.43%/month ARED)' },
@@ -284,7 +285,7 @@ const METRICS = [
   { key:'launches',     label:'Launches Required',                    unit:'×',     lo:true,  src:'NASA DRA 5.0 architecture' },
   { key:'payloadMars',  label:'Payload to Mars',                      unit:'kg',    lo:false, src:'Mass fraction from Tsiolkovsky' },
   { key:'isp',          label:'Specific Impulse',                     unit:'s',     lo:false, src:'Engine test data / manufacturer spec' },
-  { key:'deltaV',       label:'Delta-V Capability',                   unit:'km/s',  lo:false, src:'Tsiolkovsky rocket equation' },
+  { key:'deltaV',       label:'Delta-V Budget (burn total)',          unit:'km/s',  lo:false, src:'Tsiolkovsky rocket equation — NOT cruise speed' },
 ];
 
 const PLAYER_COLORS = ['#E91E8C','#00BCD4','#9C27B0','#FF5722','#CDDC39','#FFD700'];
@@ -844,6 +845,9 @@ export default function App() {
   const [raceView,     setRaceView]     = useState('race');
   const [cockpitKey,   setCockpitKey]   = useState(null);
 
+  // Per-race transit variance — different every launch (±12% from launch window / trajectory optim.)
+  const [raceVariance, setRaceVariance] = useState({});
+
   // Hazards
   const [appliedHazards,    setAppliedHazards]    = useState({});
   const [activeHazardAlert, setActiveHazardAlert] = useState(null);
@@ -868,16 +872,38 @@ export default function App() {
     return out;
   }, [crewSize, distance, risk, playerRocket]);
 
+  /* ── racedRockets: base rockets with per-race transit variance applied ── */
+  const racedRockets = useMemo(() => {
+    if (!launched || Object.keys(raceVariance).length === 0) return rockets;
+    const out = {};
+    Object.entries(rockets).forEach(([k, r]) => {
+      const v = raceVariance[k] ?? 1.0;
+      if (r.failed || v === 1.0) { out[k] = r; return; }
+      const vTransit = +(r.transit * v).toFixed(1);
+      const vRad     = +(r.radiation * v).toFixed(1);
+      const boneRate = r.habName === 'Centrifuge Hab' ? BONE_RATE_CENTRIFUGE : BONE_RATE;
+      out[k] = {
+        ...r,
+        transit:      vTransit,
+        radiation:    vRad,
+        careerRadPct: +(vRad / CAREER_RAD_LIMIT * 100).toFixed(1),
+        boneLossPct:  +(vTransit / 30 * boneRate).toFixed(1),
+        avgVelocity:  +(distance * 1e6 / (vTransit * 86400)).toFixed(2),
+      };
+    });
+    return out;
+  }, [rockets, raceVariance, launched, distance]);
+
   /* ── Max transit excludes failed rockets ── */
   const maxTransit = useMemo(() => {
-    const valid = Object.values(rockets).filter(r => !r.failed).map(r => r.transit);
+    const valid = Object.values(racedRockets).filter(r => !r.failed).map(r => r.transit);
     return valid.length > 0 ? Math.max(...valid) : 288;
-  }, [rockets]);
+  }, [racedRockets]);
 
   /* ── Per-rocket progress (derived, not state) ── */
   const rocketProgresses = useMemo(() => {
     const out = {};
-    Object.entries(rockets).forEach(([k, r]) => {
+    Object.entries(racedRockets).forEach(([k, r]) => {
       if (r.failed) {
         out[k] = clamp(raceProgress * 1.2, 0, 0.18);
       } else {
@@ -888,20 +914,32 @@ export default function App() {
       }
     });
     return out;
-  }, [raceProgress, rockets, appliedHazards, maxTransit]);
+  }, [raceProgress, racedRockets, appliedHazards, maxTransit]);
 
   const arrivals = useMemo(() => {
     const out = {};
     Object.entries(rocketProgresses).forEach(([k, rp]) => {
-      if (!rockets[k]?.failed && rp >= 1) out[k] = true;
+      if (!racedRockets[k]?.failed && rp >= 1) out[k] = true;
     });
     return out;
-  }, [rocketProgresses, rockets]);
+  }, [rocketProgresses, racedRockets]);
 
-  const stars = useMemo(() => [...Array(130)].map((_,i) => ({
-    cx:(i*127.3+41)%1200, cy:(i*83.7+19)%360,
-    r:((i*31)%18)/10+0.2, op:((i*53)%7)/10+0.3, dur:(((i*17)%40)/10+2).toFixed(1),
-  })), []);
+  const stars = useMemo(() => [...Array(300)].map((_,i) => {
+    const colorSeed = (i * 73 + 17) % 100;
+    const col = colorSeed < 55 ? '#ffffff'
+              : colorSeed < 74 ? '#c8d8ff'
+              : colorSeed < 88 ? '#fff6d0'
+              : '#ffd09a';
+    const isBright = (i * 41 + 7) % 20 === 0;
+    return {
+      cx: (i*127.3+41)%1200,
+      cy: (i*83.7+19) % 355,
+      r:  isBright ? 1.6 + ((i*19)%8)/10 : ((i*31)%14)/10 + 0.4,
+      op: isBright ? 0.95 : ((i*53)%6)/10 + 0.45,
+      dur:(((i*17)%40)/10+2).toFixed(1),
+      col,
+    };
+  }), []);
 
   /* ── UTC clock ── */
   useEffect(() => {
@@ -970,6 +1008,13 @@ export default function App() {
     setActiveHazardAlert(null);
     setRaceView('race');
 
+    // Generate per-race transit variance: ±12% from launch window timing / trajectory optimisation
+    const variance = {};
+    Object.entries(rockets).forEach(([key, rocket]) => {
+      variance[key] = rocket.failed ? 1.0 : +(0.88 + Math.random() * 0.24).toFixed(3);
+    });
+    setRaceVariance(variance);
+
     // Generate random hazards per rocket
     const haz = {};
     Object.entries(rockets).forEach(([key, rocket]) => {
@@ -982,6 +1027,23 @@ export default function App() {
         }
         if (Math.random() < chance) {
           haz[key].push({ ...event, triggerAt: 0.1 + Math.random() * 0.78, applied: false });
+        }
+      });
+
+      // Asteroid field — each visual rock has a 20% independent chance to hit
+      asteroidHints.forEach((asteroid) => {
+        const astProg = clamp((asteroid.x - 162) / 876, 0.12, 0.86);
+        if (Math.random() < 0.20) {
+          haz[key].push({
+            id:           'micrometeorite',
+            name:         'ASTEROID IMPACT',
+            icon:         '☄',
+            color:        '#cc9944',
+            speedPenalty: +(0.03 + Math.random() * 0.06).toFixed(3),
+            radMultiplier: 1.0,
+            triggerAt:    astProg,
+            applied:      false,
+          });
         }
       });
     });
@@ -1011,6 +1073,7 @@ export default function App() {
     setRaceProgress(0);    setRaceRunning(false);
     setCountdown(null);    setAppliedHazards({});
     setActiveHazardAlert(null); setDodgeOffsets({}); setImpactEvents([]);
+    setRaceVariance({});
   };
 
   /* ── Save player rocket ── */
@@ -1025,7 +1088,7 @@ export default function App() {
   const builderPreviewStats = useMemo(() => computePlayerStats(builderParts), [builderParts]);
 
   /* ── Race SVG layout ── */
-  const rocketEntries = Object.entries(rockets);
+  const rocketEntries = Object.entries(racedRockets);
   const numRockets    = rocketEntries.length;
   const laneYs        = numRockets === 4 ? [62,134,206,278] : [75,155,235];
   const svgH          = numRockets === 4 ? 360 : 325;
@@ -1194,7 +1257,7 @@ export default function App() {
                       <div className="card-stats-grid">
                         <div className="csg-item"><span className="csg-l">ISP</span><span className="csg-v" style={{color:base.color}}>{scaled.isp}s</span></div>
                         <div className="csg-item"><span className="csg-l">TRANSIT</span><span className="csg-v" style={{color:base.color}}>{scaled.transit}d</span></div>
-                        <div className="csg-item"><span className="csg-l">Δ-V</span><span className="csg-v" style={{color:base.color}}>{scaled.deltaV} km/s</span></div>
+                        <div className="csg-item"><span className="csg-l">CRUISE SPEED</span><span className="csg-v" style={{color:base.color}}>{scaled.avgVelocity} km/s</span></div>
                         <div className="csg-item"><span className="csg-l">RADIATION</span><span className="csg-v" style={{color:radColor(scaled.radiation)}}>{scaled.radiation} mSv</span></div>
                         <div className="csg-item"><span className="csg-l">COST</span><span className="csg-v" style={{color:base.color}}>${scaled.cost}B</span></div>
                         <div className="csg-item"><span className="csg-l">LAUNCHES</span><span className="csg-v" style={{color:base.color}}>{scaled.launches}×</span></div>
@@ -1529,10 +1592,9 @@ export default function App() {
               <svg className="race-track" viewBox={`0 0 1200 ${svgH}`} preserveAspectRatio="xMidYMid meet">
                 <defs>
                   <linearGradient id="spaceBg" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%"   stopColor="#040115" />
-                    <stop offset="40%"  stopColor="#0e0620" />
-                    <stop offset="70%"  stopColor="#110407" />
-                    <stop offset="100%" stopColor="#0d0308" />
+                    <stop offset="0%"   stopColor="#00020a" />
+                    <stop offset="40%"  stopColor="#02010e" />
+                    <stop offset="100%" stopColor="#010008" />
                   </linearGradient>
                   <radialGradient id="eGlow" cx="50%" cy="50%" r="50%">
                     <stop offset="0%"   stopColor="#5580bb" stopOpacity="0.55" />
@@ -1542,21 +1604,27 @@ export default function App() {
                     <stop offset="0%"   stopColor="#d84010" stopOpacity="0.55" />
                     <stop offset="100%" stopColor="transparent" />
                   </radialGradient>
-                  <radialGradient id="sunHalo" cx="0%" cy="50%" r="100%">
-                    <stop offset="0%"   stopColor="#ffcc44" stopOpacity="0.22" />
-                    <stop offset="60%"  stopColor="#ff8800" stopOpacity="0.06" />
+                  <radialGradient id="sunHalo" cx="0%" cy="50%" r="60%">
+                    <stop offset="0%"   stopColor="#fff8e0" stopOpacity="0.55" />
+                    <stop offset="18%"  stopColor="#ffe090" stopOpacity="0.18" />
+                    <stop offset="50%"  stopColor="#ff8800" stopOpacity="0.05" />
                     <stop offset="100%" stopColor="transparent" />
                   </radialGradient>
                   <radialGradient id="nebula1" cx="50%" cy="50%" r="50%">
-                    <stop offset="0%"   stopColor="#2a1040" stopOpacity="0.55" />
+                    <stop offset="0%"   stopColor="#1a0828" stopOpacity="0.28" />
                     <stop offset="100%" stopColor="transparent" />
                   </radialGradient>
                   <radialGradient id="nebula2" cx="50%" cy="50%" r="50%">
-                    <stop offset="0%"   stopColor="#0a1e30" stopOpacity="0.5" />
+                    <stop offset="0%"   stopColor="#06111e" stopOpacity="0.22" />
                     <stop offset="100%" stopColor="transparent" />
                   </radialGradient>
                   <radialGradient id="moonGlow" cx="50%" cy="50%" r="50%">
                     <stop offset="0%"   stopColor="#cccccc" stopOpacity="0.4" />
+                    <stop offset="100%" stopColor="transparent" />
+                  </radialGradient>
+                  <radialGradient id="solGlow" cx="50%" cy="50%" r="50%">
+                    <stop offset="0%"   stopColor="#ffffff" stopOpacity="1" />
+                    <stop offset="35%"  stopColor="#fff5cc" stopOpacity="0.7" />
                     <stop offset="100%" stopColor="transparent" />
                   </radialGradient>
                   <filter id="glow">
@@ -1567,24 +1635,41 @@ export default function App() {
                     <feGaussianBlur stdDeviation="1.5" result="blur"/>
                     <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
                   </filter>
+                  <filter id="starGlow">
+                    <feGaussianBlur stdDeviation="1.2" result="blur"/>
+                    <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                  </filter>
                 </defs>
                 <rect x="0" y="0" width="1200" height={svgH} fill="url(#spaceBg)" />
 
-                {/* Deep space nebula layers — aesthetic depth */}
-                <ellipse cx="320" cy={svgH*0.28} rx="280" ry="95" fill="url(#nebula1)" opacity="0.14"/>
-                <ellipse cx="820" cy={svgH*0.72} rx="240" ry="75" fill="url(#nebula2)" opacity="0.11"/>
-                <ellipse cx="600" cy={svgH*0.5} rx="180" ry="55" fill="url(#nebula1)" opacity="0.06"/>
-                {/* Sun radiation source — Sol at left, driving solar wind and radiation */}
-                <rect x="0" y="0" width="100" height={svgH} fill="url(#sunHalo)" opacity="0.9"/>
+                {/* Milky Way — subtle band of slightly brighter deep sky */}
+                <ellipse cx="600" cy={svgH*0.5} rx="580" ry={svgH*0.2} fill="#0d0a22" opacity="0.55"/>
+
+                {/* Deep space nebulae — faint colour clouds like real Hubble imagery */}
+                <ellipse cx="320" cy={svgH*0.28} rx="280" ry="95" fill="url(#nebula1)" opacity="0.18"/>
+                <ellipse cx="820" cy={svgH*0.72} rx="240" ry="75" fill="url(#nebula2)" opacity="0.14"/>
+                <ellipse cx="600" cy={svgH*0.55} rx="160" ry="55" fill="url(#nebula1)" opacity="0.08"/>
+
+                {/* Sol — distant star at left edge, bright point + halo */}
+                <circle cx="12" cy={svgH/2} r="28" fill="url(#sunHalo)" opacity="0.9"/>
+                <circle cx="12" cy={svgH/2} r="7"  fill="url(#solGlow)" opacity="1"/>
+                <circle cx="12" cy={svgH/2} r="4"  fill="#ffffff" opacity="1"/>
+                {/* Sun corona spikes */}
+                {[0,45,90,135,180,225,270,315].map((a,i) => (
+                  <line key={i}
+                    x1={12 + Math.cos(a*Math.PI/180)*8}  y1={svgH/2 + Math.sin(a*Math.PI/180)*8}
+                    x2={12 + Math.cos(a*Math.PI/180)*14} y2={svgH/2 + Math.sin(a*Math.PI/180)*14}
+                    stroke="#fff8cc" strokeWidth={i%2===0?"1":"0.6"} opacity="0.6"/>
+                ))}
 
                 {/* Trajectory arc — Earth to Mars transfer path */}
                 <path d={`M 100,${earthY} Q 600,${earthY - 18} 1090,${marsY}`}
                   fill="none" stroke="#3a1505" strokeWidth="1" strokeDasharray="6,14" opacity="0.35"/>
 
                 {stars.map((s,i) => (
-                  <circle key={i} cx={s.cx} cy={Math.min(s.cy, svgH-5)} r={s.r} fill="#fff" opacity={s.op}>
+                  <circle key={i} cx={s.cx} cy={Math.min(s.cy, svgH-5)} r={s.r} fill={s.col} opacity={s.op}>
                     <animate attributeName="opacity" dur={`${s.dur}s`} repeatCount="indefinite"
-                      values={`${s.op};${Math.min(1,s.op+0.45)};${s.op}`}/>
+                      values={`${s.op};${Math.min(1,s.op+0.3)};${s.op}`}/>
                   </circle>
                 ))}
 
@@ -1891,7 +1976,21 @@ export default function App() {
                           fontSize="7" fontFamily="Orbitron" textAnchor="middle" fontWeight="700">
                           {rocket.shortLabel}
                         </text>
-                        <text x="12" y="26" fill={exploding?'#ff5555':rocket.color}
+                        {/* Cruise speed — large, clearly visible */}
+                        {!exploding && !arrived && rocket.avgVelocity && (
+                          <>
+                            <text x="12" y="13" fill={rocket.color} fontSize="8.5"
+                              fontFamily="Share Tech Mono" textAnchor="middle" fontWeight="700" opacity="0.95">
+                              {rocket.avgVelocity} km/s
+                            </text>
+                            {/* Speed bar relative to fastest */}
+                            <rect x="-18" y="17" width="60" height="3" fill="rgba(255,255,255,0.08)" rx="1.5"/>
+                            <rect x="-18" y="17"
+                              width={60 * (rocket.avgVelocity / 12)}
+                              height="3" fill={rocket.color} rx="1.5" opacity="0.7"/>
+                          </>
+                        )}
+                        <text x="12" y="28" fill={exploding?'#ff5555':rocket.color}
                           fontSize="6.5" fontFamily="Share Tech Mono" textAnchor="middle">
                           {arrived ? '✓ ARRIVED' : exploding ? '💥 ABORT' : `Day ${Math.round(rp*rocket.transit)}`}
                         </text>
@@ -2217,7 +2316,7 @@ export default function App() {
                     })}
                   </tbody>
                 </table>
-                {rockets.player && (
+                {racedRockets.player && (
                   <div style={{fontSize:'0.6rem', color:'#555', marginTop:'8px',
                     fontFamily:'Share Tech Mono', padding:'4px 8px',
                     border:'1px solid #2a1a0a', borderRadius:'4px', display:'inline-block'}}>
@@ -2236,17 +2335,17 @@ export default function App() {
                       rocketList={rocketEntries.filter(([k])=>k!=='player').map(([,r])=>r)}/>
                   ))}
                 </div>
-                {rockets.player && !rockets.player.failed && (
+                {racedRockets.player && !racedRockets.player.failed && (
                   <div style={{margin:'14px 0 0', padding:'12px 16px',
-                    background:'rgba(0,0,0,0.35)', border:`1px solid ${rockets.player.color}33`,
+                    background:'rgba(0,0,0,0.35)', border:`1px solid ${racedRockets.player.color}33`,
                     borderRadius:'8px', fontSize:'0.72rem', color:'#888',
                     fontFamily:'Share Tech Mono'}}>
-                    <span style={{color:rockets.player.color, fontWeight:700}}>{rockets.player.label}</span>
+                    <span style={{color:racedRockets.player.color, fontWeight:700}}>{racedRockets.player.label}</span>
                     {' '}(custom) —{' '}
-                    transit {rockets.player.transit}d · radiation {rockets.player.radiation} mSv ·
-                    ΔV {rockets.player.deltaV} km/s · bone loss {rockets.player.boneLossPct}% ·
-                    abort ΔV {rockets.player.abortDv} km/s · cost ${rockets.player.cost}B ·
-                    payload {(rockets.player.payloadMars/1000).toFixed(0)}t
+                    transit {racedRockets.player.transit}d · radiation {racedRockets.player.radiation} mSv ·
+                    ΔV {racedRockets.player.deltaV} km/s · bone loss {racedRockets.player.boneLossPct}% ·
+                    abort ΔV {racedRockets.player.abortDv} km/s · cost ${racedRockets.player.cost}B ·
+                    payload {(racedRockets.player.payloadMars/1000).toFixed(0)}t
                     <span style={{color:'#555', display:'block', marginTop:'4px', fontSize:'0.6rem'}}>
                       Custom rocket data shown above for reference only — not included in fleet comparison.
                     </span>
@@ -2257,10 +2356,10 @@ export default function App() {
 
             {/* INSIGHTS */}
             {debriefTab === 'insights' && (() => {
-              const chem = rockets.chemical;
-              const ntr  = rockets.nuclear;
-              const shp  = rockets.starship;
-              const pl   = rockets.player;
+              const chem = racedRockets.chemical;
+              const ntr  = racedRockets.nuclear;
+              const shp  = racedRockets.starship;
+              const pl   = racedRockets.player;
               return (
                 <div>
                   <div className="insights">

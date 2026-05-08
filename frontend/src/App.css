@@ -32,10 +32,10 @@ body {
   font-family: 'Share Tech Mono', monospace;
   font-size: 13px;
   background:
-    radial-gradient(ellipse at 15% 0%,   #2a0a06 0%, transparent 50%),
-    radial-gradient(ellipse at 85% 100%,  #1a0508 0%, transparent 50%),
-    radial-gradient(ellipse at 50% 50%,   #120206 0%, transparent 70%),
-    #08030a;
+    radial-gradient(ellipse at 20% 10%,  #040a1e 0%, transparent 55%),
+    radial-gradient(ellipse at 80% 90%,  #02040e 0%, transparent 55%),
+    radial-gradient(ellipse at 50% 50%,  #010208 0%, transparent 70%),
+    #000008;
   color: var(--text);
   min-height: 100vh;
   overflow-x: hidden;
@@ -82,31 +82,14 @@ body {
   z-index: 1;
   max-width: 1240px;
   margin: 0 auto;
-  background: rgba(5, 8, 20, 0.98);
-  border: 1px solid var(--border-mid);
+  background: rgba(2, 4, 14, 0.98);
+  border: 1px solid #1a2a4a;
   border-radius: 12px;
   overflow: hidden;
   box-shadow:
     0 0 80px rgba(0, 0, 0, 0.95),
-    0 0 0 1px rgba(232, 98, 42, 0.08),
+    0 0 0 1px rgba(40, 80, 160, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.03);
-  animation: panelAmbient 8s ease-in-out infinite;
-}
-
-@keyframes panelAmbient {
-  0%, 100% {
-    box-shadow:
-      0 0 80px rgba(0, 0, 0, 0.95),
-      0 0 0 1px rgba(232, 98, 42, 0.08),
-      inset 0 1px 0 rgba(255, 255, 255, 0.03);
-  }
-  50% {
-    box-shadow:
-      0 0 90px rgba(0, 0, 0, 0.95),
-      0 0 0 1px rgba(232, 98, 42, 0.2),
-      0 0 50px rgba(180, 50, 10, 0.07),
-      inset 0 1px 0 rgba(255, 255, 255, 0.03);
-  }
 }
 
 /* ═══════════════════════════════════════════════════════════
