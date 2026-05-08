@@ -959,7 +959,7 @@ export default function App() {
 
   /* ── Loading screen ── */
   useEffect(() => {
-    const messages = ['INITIALIZING SYSTEMS...', 'LOADING TELEMETRY...', 'CALCULATING TRAJECTORY...', 'ALL SYSTEMS GO'];
+    const messages = ['INITIALIZING SYSTEMS', 'LOADING TELEMETRY', 'CALCULATING TRAJECTORY', 'ALL SYSTEMS GO'];
     let messageIndex = 0;
     const interval = setInterval(() => {
       setLoadingProgress(prev => {
@@ -1154,9 +1154,9 @@ export default function App() {
 
   /* ═══════════════════════════════════ RENDER ═══════════════════════════════════ */
 
-  if (isLoading) {
-    return (
-      <div className="loading-screen">
+  return (
+    <>
+      <div className="loading-screen" style={{ opacity: isLoading ? 1 : 0, transition: 'opacity 0.5s ease-out' }}>
         <div className="loading-content">
           <h1 className="loading-title">MARS MISSION CONTROL</h1>
           <div className="loading-progress-container">
@@ -1166,14 +1166,10 @@ export default function App() {
           <div className="loading-percentage">{Math.round(loadingProgress)}%</div>
         </div>
       </div>
-    );
-  }
-
-  return (
-    <div className="app">
-      <div className="scanlines" />
-      <div className="vignette" />
-      <div className="panel">
+      <div className="app" style={{ opacity: isLoading ? 0 : 1, transition: 'opacity 0.5s ease-out' }}>
+        <div className="scanlines" />
+        <div className="vignette" />
+        <div className="panel">
 
         {/* HEADER */}
         <header className="mcc-header">
