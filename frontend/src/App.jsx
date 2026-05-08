@@ -837,6 +837,11 @@ export default function App() {
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [loadingText, setLoadingText] = useState('INITIALIZING SYSTEMS...');
 
+  // PWA Install prompt
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [showInstallBanner, setShowInstallBanner] = useState(false);
+  const installPromptRef = useRef(false);
+
   // Player rocket
   const [playerRocket,   setPlayerRocket]   = useState(null);
   const [showBuilder,    setShowBuilder]     = useState(false);
@@ -978,6 +983,67 @@ export default function App() {
     }, 30); // ~30ms for smooth animation
     return () => clearInterval(interval);
   }, []);
+
+  /* ── PWA Install Prompt ── */
+  useEffect(() => {
+    // Check if user previously dismissed the install banner
+    const isDismissed = localStorage.getItem('mars-mmc-install-dismissed');
+    if (isDismissed) {
+      installPromptRef.current = true;
+      return;
+    }
+
+    const handleBeforeInstallPrompt = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      // Only show banner if loading has finished
+      if (!isLoading) {
+        setShowInstallBanner(true);
+      }
+    };
+
+    const handleAppInstalled = () => {
+      setDeferredPrompt(null);
+      setShowInstallBanner(false);
+      localStorage.setItem('mars-mmc-install-dismissed', 'true');
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, [isLoading]);
+
+  /* ── Show install banner after loading finishes ── */
+  useEffect(() => {
+    if (!isLoading && deferredPrompt && !installPromptRef.current) {
+      const isDismissed = localStorage.getItem('mars-mmc-install-dismissed');
+      if (!isDismissed) {
+        setShowInstallBanner(true);
+      }
+    }
+  }, [isLoading, deferredPrompt]);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    setShowInstallBanner(false);
+    installPromptRef.current = true;
+    localStorage.setItem('mars-mmc-install-dismissed', 'true');
+    if (outcome === 'accepted') {
+      setDeferredPrompt(null);
+    }
+  };
+
+  const handleDismissInstall = () => {
+    setShowInstallBanner(false);
+    localStorage.setItem('mars-mmc-install-dismissed', 'true');
+    installPromptRef.current = true;
+  };
 
   /* ── Race loop ── */
   useEffect(() => {
@@ -1170,6 +1236,23 @@ export default function App() {
         <div className="scanlines" />
         <div className="vignette" />
         <div className="panel">
+
+        {/* PWA INSTALL BANNER */}
+        {showInstallBanner && deferredPrompt && !isLoading && (
+          <div className="install-banner">
+            <div className="install-banner-content">
+              <span className="install-banner-text">Install Mars Mission Control on your device for the best experience</span>
+              <div className="install-banner-actions">
+                <button className="install-banner-btn-install" onClick={handleInstallClick}>
+                  ⬇ INSTALL
+                </button>
+                <button className="install-banner-btn-dismiss" onClick={handleDismissInstall}>
+                  ✕
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* HEADER */}
         <header className="mcc-header">
