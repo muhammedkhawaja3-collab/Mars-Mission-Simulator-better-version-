@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="grad512" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ff9a5c;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#e8622a;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="#020810"/>
+  <circle cx="256" cy="256" r="230" fill="url(#grad512)"/>
+  <text x="256" y="290" font-family="Arial, sans-serif" font-size="128" font-weight="bold" fill="#020810" text-anchor="middle" letter-spacing="4">MMC</text>
+  <circle cx="256" cy="256" r="230" fill="none" stroke="#ff8c00" stroke-width="8" opacity="0.5"/>
+  <path d="M 256 80 L 300 180 L 410 180 L 330 250 L 370 360 L 256 290 L 142 360 L 182 250 L 102 180 L 212 180 Z" fill="#ffcc00" opacity="0.8"/>
+</svg>

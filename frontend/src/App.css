@@ -2656,3 +2656,662 @@ select:focus {
   border-radius: 50%;
   background: white;
 }
+
+/* ═══════════════════════════════════════════════════════════
+   MOBILE RESPONSIVE — ALL SCREEN SIZES
+   ═══════════════════════════════════════════════════════════ */
+
+/* ─── Extra Small Phones (320px - 480px) ─── */
+@media (max-width: 480px) {
+  body {
+    font-size: 12px;
+  }
+
+  .app {
+    padding: 8px;
+  }
+
+  .panel {
+    border-radius: 8px;
+  }
+
+  .mcc-header {
+    padding: 12px 16px;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .mcc-header-left,
+  .mcc-header-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .mcc-logo-mark {
+    font-size: 1.8rem;
+  }
+
+  .mcc-title {
+    font-size: 1.2rem;
+  }
+
+  .mcc-subtitle {
+    font-size: 0.48rem;
+  }
+
+  .mcc-clock {
+    font-size: 0.95rem;
+  }
+
+  .status-bar {
+    padding: 6px 16px;
+    font-size: 0.62rem;
+  }
+
+  .config {
+    padding: 16px;
+  }
+
+  .controls-grid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+    margin-bottom: 14px;
+  }
+
+  .spec-cards {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+  .spec-card {
+    padding: 12px;
+  }
+
+  .launch {
+    padding: 12px 16px;
+    font-size: 0.72rem;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .countdown {
+    font-size: 5rem;
+  }
+
+  .countdown-label-top,
+  .countdown-label-bottom {
+    font-size: 0.6rem;
+  }
+
+  .race-area {
+    padding: 14px 16px;
+  }
+
+  .telemetry-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .telemetry-card {
+    padding: 12px;
+  }
+
+  .debrief-table {
+    font-size: 0.7rem;
+  }
+
+  .debrief-table th,
+  .debrief-table td {
+    padding: 8px 6px;
+    font-size: 0.65rem;
+  }
+
+  .metric-col {
+    min-width: 100px;
+  }
+
+  .ntr-adv-keypoints {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .ntr-adv-title {
+    font-size: 0.7rem;
+  }
+
+  .ntr-adv-kp-num {
+    font-size: 1.6rem;
+  }
+
+  .ntr-adv-kp-label {
+    font-size: 0.48rem;
+  }
+
+  .builder-preview {
+    padding: 10px;
+  }
+
+  .loading-title {
+    font-size: 2rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .loading-progress-container {
+    width: 200px;
+  }
+
+  .loading-text {
+    font-size: 0.9rem;
+  }
+
+  .loading-percentage {
+    font-size: 1.2rem;
+  }
+
+  .debrief-tabs {
+    gap: 4px;
+  }
+
+  .debrief-tab {
+    padding: 8px 4px;
+    font-size: 0.56rem;
+  }
+
+  .charts-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .cockpit-header {
+    gap: 8px;
+    padding: 6px 12px;
+  }
+
+  .cockpit-rocket-name {
+    font-size: 0.68rem;
+  }
+
+  .cockpit-status {
+    font-size: 0.56rem;
+  }
+
+  .part-cards-grid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    max-height: 300px;
+  }
+
+  .builder-name-input {
+    font-size: 0.75rem;
+  }
+
+  .modal {
+    padding: 16px;
+    border-radius: 8px;
+  }
+
+  .modal h2 {
+    font-size: 1rem;
+    margin-bottom: 16px;
+  }
+
+  .btn-primary,
+  .btn-secondary {
+    padding: 10px;
+    min-height: 44px;
+    font-size: 0.65rem;
+  }
+
+  .builder-buttons {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .builder-buttons button {
+    width: 100%;
+  }
+
+  .rocket-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .spec-bottom-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .card-stats-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ─── Small Phones (481px - 640px) ─── */
+@media (max-width: 640px) {
+  body {
+    font-size: 12px;
+  }
+
+  .app {
+    padding: 10px;
+  }
+
+  .mcc-header {
+    padding: 14px 18px;
+  }
+
+  .mcc-logo-mark {
+    font-size: 2rem;
+  }
+
+  .mcc-title {
+    font-size: 1.3rem;
+  }
+
+  .config {
+    padding: 16px;
+  }
+
+  .controls-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .spec-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .launch {
+    padding: 13px 18px;
+    font-size: 0.76rem;
+    min-height: 44px;
+  }
+
+  .countdown {
+    font-size: 6rem;
+  }
+
+  .race-area {
+    padding: 16px;
+  }
+
+  .telemetry-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .debrief-table {
+    font-size: 0.72rem;
+  }
+
+  .debrief-table th,
+  .debrief-table td {
+    padding: 8px 8px;
+  }
+
+  .ntr-adv-keypoints {
+    grid-template-columns: 1fr;
+  }
+
+  .part-cards-grid {
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  }
+
+  .loading-title {
+    font-size: 2.2rem;
+  }
+
+  .loading-progress-container {
+    width: 220px;
+  }
+
+  .loading-text {
+    font-size: 0.95rem;
+  }
+
+  .charts-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .cockpit-selector {
+    gap: 4px;
+  }
+
+  .cockpit-select-btn {
+    padding: 5px 10px;
+    font-size: 0.55rem;
+  }
+
+  .rocket-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .spec-bottom-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ─── Tablets & Medium (641px - 1024px) ─── */
+@media (max-width: 1024px) {
+  .app {
+    padding: 12px;
+  }
+
+  .mcc-header {
+    padding: 16px 22px;
+    flex-wrap: wrap;
+  }
+
+  .mcc-logo-mark {
+    font-size: 2.2rem;
+  }
+
+  .mcc-title {
+    font-size: 1.4rem;
+  }
+
+  .controls-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .spec-cards {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .telemetry-grid {
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  }
+
+  .ntr-adv-keypoints {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .charts-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .part-cards-grid {
+    grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
+  }
+
+  .rocket-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .spec-bottom-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .debrief-table {
+    font-size: 0.76rem;
+    overflow-x: auto;
+  }
+
+  .modal {
+    max-width: 90vw;
+    padding: 22px;
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    width: 16px;
+    height: 16px;
+  }
+}
+
+/* ─── Large Desktop (1025px+) ─── */
+@media (min-width: 1025px) {
+  .controls-grid {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+
+  .spec-cards {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .telemetry-grid {
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  }
+
+  .ntr-adv-keypoints {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .charts-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .part-cards-grid {
+    grid-template-columns: repeat(auto-fill, minmax(165px, 1fr));
+  }
+
+  .rocket-cards {
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  }
+}
+
+/* ─── Ensure Minimum Button Heights Across All Sizes ─── */
+button,
+input[type="button"],
+input[type="submit"],
+.launch,
+.btn-primary,
+.btn-secondary,
+.launch-ready,
+.builder-btn,
+.debrief-tab,
+.view-btn,
+.cockpit-select-btn,
+.rocket-btn,
+.part-card {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+button,
+.launch,
+.btn-primary,
+.btn-secondary,
+.launch-ready,
+.builder-btn,
+.debrief-tab,
+.view-btn,
+.cockpit-select-btn,
+.rocket-btn {
+  padding: 10px 14px;
+}
+
+select,
+input[type="range"] {
+  min-height: 44px;
+  padding: 8px 12px;
+}
+
+/* ─── SVG Responsiveness ─── */
+svg {
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+}
+
+.cockpit-svg,
+.race-track {
+  width: 100%;
+  height: auto;
+}
+
+/* ─── Prevent Horizontal Overflow ─── */
+html,
+body {
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+.panel,
+.app,
+.config,
+.race-area,
+.debrief {
+  overflow-x: hidden;
+}
+
+/* ─── Flexible Card Layouts ─── */
+.spec-card,
+.telemetry-card,
+.part-card,
+.rocket-card,
+.ntr-advantage {
+  overflow: hidden;
+  word-wrap: break-word;
+}
+
+.spec-card-name,
+.part-card-name,
+.telemetry-header h4,
+.rocket-card-header h3 {
+  word-break: break-word;
+  white-space: normal;
+}
+
+/* ─── Touch-Friendly Spacing ─── */
+@media (hover: none) and (pointer: coarse) {
+  button,
+  select,
+  input[type="range"] {
+    padding: 12px 16px;
+  }
+
+  .launch,
+  .btn-primary,
+  .btn-secondary {
+    padding: 14px 18px;
+    font-size: 0.8rem;
+  }
+
+  .spec-card,
+  .telemetry-card,
+  .rocket-card {
+    padding: 14px;
+  }
+
+  select:focus,
+  input[type="text"]:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+
+/* ─── Safe Area for Notched Devices ─── */
+@supports (padding: max(0px)) {
+  .panel {
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+  }
+
+  .mcc-header,
+  .config,
+  .race-area,
+  .debrief {
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+  }
+}
+
+/* ─── Landscape Mode (Small Height) ─── */
+@media (max-height: 500px) {
+  .countdown {
+    font-size: 4rem;
+  }
+
+  .countdown-overlay {
+    padding: 20px 28px;
+  }
+
+  .spec-card {
+    padding: 8px;
+  }
+
+  .control-row {
+    gap: 8px;
+  }
+
+  .race-area {
+    padding: 12px 16px;
+  }
+}
+
+/* ─── Print Media ─── */
+@media print {
+  .scanlines,
+  .vignette,
+  .launch,
+  .builder-btn {
+    display: none;
+  }
+
+  .panel {
+    max-width: 100%;
+    box-shadow: none;
+  }
+}
+
+/* ─── Accessibility: Reduced Motion ─── */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ─── Dark Mode Support ─── */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-deep: #08030a;
+    --panel-bg: #120609;
+  }
+}
+
+/* ─── High DPI / Retina Screens ─── */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  .scanlines {
+    background-image: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0, 0, 0, 0.055) 2px,
+      rgba(0, 0, 0, 0.055) 3px
+    );
+  }
+}
+
+/* ─── Landscape Orientation ─── */
+@media (orientation: landscape) {
+  .app {
+    min-height: auto;
+  }
+
+  .countdown {
+    font-size: 7rem;
+  }
+
+  @media (max-height: 600px) {
+    .countdown {
+      font-size: 5rem;
+    }
+
+    .status-bar {
+      padding: 4px 16px;
+    }
+
+    .config {
+      padding: 12px 16px;
+    }
+  }
+}
+
+/* ─── Portrait Orientation ─── */
+@media (orientation: portrait) {
+  .app {
+    min-height: 100vh;
+  }
+}
