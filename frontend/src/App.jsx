@@ -832,6 +832,11 @@ export default function App() {
   const [debriefTab,   setDebriefTab]   = useState('table');
   const [clock,        setClock]        = useState('00:00:00');
 
+  // Loading screen state
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadingProgress, setLoadingProgress] = useState(0);
+  const [loadingText, setLoadingText] = useState('INITIALIZING SYSTEMS...');
+
   // Player rocket
   const [playerRocket,   setPlayerRocket]   = useState(null);
   const [showBuilder,    setShowBuilder]     = useState(false);
@@ -950,6 +955,28 @@ export default function App() {
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
+  }, []);
+
+  /* ── Loading screen ── */
+  useEffect(() => {
+    const messages = ['INITIALIZING SYSTEMS...', 'LOADING TELEMETRY...', 'CALCULATING TRAJECTORY...', 'ALL SYSTEMS GO'];
+    let messageIndex = 0;
+    const interval = setInterval(() => {
+      setLoadingProgress(prev => {
+        const newProgress = prev + (100 / 300); // 3 seconds, 100 updates
+        if (newProgress >= 100) {
+          setIsLoading(false);
+          clearInterval(interval);
+          return 100;
+        }
+        if (newProgress >= (messageIndex + 1) * 25) {
+          messageIndex = (messageIndex + 1) % messages.length;
+          setLoadingText(messages[messageIndex]);
+        }
+        return newProgress;
+      });
+    }, 30); // ~30ms for smooth animation
+    return () => clearInterval(interval);
   }, []);
 
   /* ── Race loop ── */
@@ -1126,6 +1153,21 @@ export default function App() {
     : 'Configure mission parameters and launch.';
 
   /* ═══════════════════════════════════ RENDER ═══════════════════════════════════ */
+
+  if (isLoading) {
+    return (
+      <div className="loading-screen">
+        <div className="loading-content">
+          <h1 className="loading-title">MARS MISSION CONTROL</h1>
+          <div className="loading-progress-container">
+            <div className="loading-progress-bar" style={{ width: `${loadingProgress}%` }}></div>
+          </div>
+          <div className="loading-text">{loadingText}</div>
+          <div className="loading-percentage">{Math.round(loadingProgress)}%</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app">

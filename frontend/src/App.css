@@ -69,6 +69,68 @@ body {
   );
 }
 
+/* ─── Loading Screen ─── */
+.loading-screen {
+  position: fixed;
+  inset: 0;
+  background-color: #020810;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  animation: fadeOut 0.5s ease-out 3s forwards;
+}
+
+.loading-content {
+  text-align: center;
+  color: #ff8c00;
+}
+
+.loading-title {
+  font-family: 'Orbitron', monospace;
+  font-size: 3rem;
+  font-weight: 900;
+  margin-bottom: 2rem;
+  letter-spacing: 0.1em;
+}
+
+.loading-progress-container {
+  width: 300px;
+  height: 8px;
+  background-color: rgba(255, 140, 0, 0.2);
+  border-radius: 4px;
+  margin-bottom: 1rem;
+  overflow: hidden;
+}
+
+.loading-progress-bar {
+  height: 100%;
+  background-color: #ff8c00;
+  border-radius: 4px;
+  transition: width 0.03s linear;
+}
+
+.loading-text {
+  font-family: 'Orbitron', monospace;
+  font-size: 1.2rem;
+  font-weight: 700;
+  margin-bottom: 1rem;
+  letter-spacing: 0.05em;
+}
+
+.loading-percentage {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+@keyframes fadeOut {
+  to {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
 /* ─── App container ─── */
 .app {
   min-height: 100vh;
