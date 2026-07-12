@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(grep -Pn '<br\\\\\\\\>' \"c:/Users/muham/OneDrive/Documents/GitHub/RocketV2/frontend/src/App.jsx\")"
+      "Bash(grep -Pn '<br\\\\\\\\>' \"c:/Users/muham/OneDrive/Documents/GitHub/RocketV2/frontend/src/App.jsx\")",
+      "Bash(git -C \"/workspace/daily-ops-tracker.\" status --short)",
+      "Read(//workspace/daily-ops-tracker./node_modules/**)",
+      "Bash(rm -rf \"/workspace/daily-ops-tracker./node_modules\")"
     ]
   }
 }
