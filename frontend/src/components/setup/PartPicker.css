@@ -1,0 +1,98 @@
+.part-picker {
+  min-width: 0;
+  padding: 0;
+  border: none;
+}
+
+.part-picker__legend {
+  margin-bottom: var(--space-2);
+  font-family: var(--font-display);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.part-picker__intro {
+  margin-bottom: var(--space-3);
+  padding: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  background: var(--color-info-soft);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+}
+
+.part-picker__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 14rem), 1fr));
+  gap: var(--space-3);
+}
+
+.part-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-inset);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+}
+
+.part-card:has(.part-card__input:checked) {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+  box-shadow: var(--shadow-glow);
+}
+
+.part-card:has(.part-card__input:focus-visible) {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.part-card__input {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  width: 20px;
+  height: 20px;
+  accent-color: var(--color-accent);
+}
+
+.part-card__label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-right: var(--space-8);
+  cursor: pointer;
+}
+
+/* Make the whole card a click target for the radio. */
+.part-card__label::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+.part-card__name {
+  font-family: var(--font-display);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  color: var(--color-text);
+}
+
+.part-card__meta {
+  font-size: var(--text-sm);
+  color: var(--color-accent);
+}
+
+.part-card__desc {
+  font-size: var(--text-sm);
+  color: var(--color-text-subtle);
+}
+
+.part-card__warning {
+  color: var(--color-warning);
+}

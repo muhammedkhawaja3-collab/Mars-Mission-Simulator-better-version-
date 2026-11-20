@@ -1,0 +1,22 @@
+/*
+ * Self-hosted fonts (woff2 only, Latin subset) from @fontsource packages.
+ * Replaces the render-blocking Google Fonts stylesheet. Only the weights the
+ * UI uses are loaded: Orbitron 700 (display headings) and Share Tech Mono 400.
+ * font-display: swap keeps text visible while the files load.
+ */
+@font-face {
+  font-family: 'Orbitron';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('@fontsource/orbitron/files/orbitron-latin-700-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Share Tech Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('@fontsource/share-tech-mono/files/share-tech-mono-latin-400-normal.woff2')
+    format('woff2');
+}

@@ -1,0 +1,25 @@
+.success-factors {
+  margin-top: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.success-factors summary {
+  min-height: var(--tap-target);
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--color-info);
+}
+
+.success-factors ul {
+  margin: var(--space-2) 0;
+}
+
+.success-factors li + li {
+  margin-top: var(--space-1);
+}
+
+.success-factors strong {
+  color: var(--color-text);
+}

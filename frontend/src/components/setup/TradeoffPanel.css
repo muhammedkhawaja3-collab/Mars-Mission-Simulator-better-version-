@@ -1,0 +1,36 @@
+.tradeoffs {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.tradeoffs__title {
+  color: var(--color-accent);
+  text-transform: uppercase;
+}
+
+.tradeoffs__formula {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.tradeoffs__bars {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.tradeoffs__why {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.tradeoff-list {
+  display: grid;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+@media (min-width: 1280px) {
+  .tradeoffs__bars {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

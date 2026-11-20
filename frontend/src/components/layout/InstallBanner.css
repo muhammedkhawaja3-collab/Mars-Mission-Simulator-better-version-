@@ -1,0 +1,32 @@
+.install-banner {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--z-banner);
+  background: var(--color-raised);
+  border-top: 2px solid var(--color-accent);
+  box-shadow: var(--shadow-lg);
+}
+
+.install-banner__inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-block: var(--space-3);
+}
+
+.install-banner__title {
+  font-size: var(--text-sm);
+  color: var(--color-accent);
+}
+
+.install-banner__text {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.install-banner__actions {
+  display: flex;
+  gap: var(--space-2);
+}

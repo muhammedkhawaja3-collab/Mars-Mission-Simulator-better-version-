@@ -1,0 +1,54 @@
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--space-4) var(--space-2);
+  overflow-y: auto;
+}
+
+.dialog-backdrop__scrim {
+  position: fixed;
+  inset: 0;
+  background: var(--color-overlay);
+  backdrop-filter: blur(3px);
+}
+
+.dialog {
+  position: relative;
+  width: 100%;
+  max-width: 960px;
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-top: 3px solid var(--color-accent);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+.dialog:focus-visible {
+  outline: 3px solid var(--color-focus);
+}
+
+.dialog__title {
+  font-size: var(--text-xl);
+  color: var(--color-accent);
+}
+
+.dialog__description {
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+@media (min-width: 768px) {
+  .dialog-backdrop {
+    padding: var(--space-8) var(--space-4);
+  }
+
+  .dialog {
+    padding: var(--space-6);
+  }
+}

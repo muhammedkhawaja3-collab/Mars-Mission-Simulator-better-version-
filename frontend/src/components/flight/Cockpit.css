@@ -1,0 +1,258 @@
+.cockpit {
+  margin: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+
+.cockpit__head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.cockpit__name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-display);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+.cockpit__status {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.cockpit__status[data-status='arrived'] {
+  color: var(--color-success);
+}
+
+.cockpit__status[data-status='no-go'],
+.cockpit__status[data-status='aborted'] {
+  color: var(--color-danger);
+}
+
+.cockpit__window {
+  --look-x: 0;
+  --look-y: 0;
+  position: relative;
+  overflow: hidden;
+  color: var(--lane);
+  background: radial-gradient(
+    ellipse at 50% 45%,
+    var(--color-space-near),
+    var(--color-space-far) 75%
+  );
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+}
+
+.cockpit__svg {
+  width: 100%;
+  height: auto;
+}
+
+.cockpit__stop--light {
+  stop-color: var(--color-mars-light);
+}
+
+.cockpit__stop--mid {
+  stop-color: var(--color-mars);
+}
+
+.cockpit__stop--deep {
+  stop-color: var(--color-mars-deep);
+}
+
+.cockpit__layer--far circle {
+  fill: var(--color-star-far);
+}
+
+.cockpit__layer--near circle {
+  fill: var(--color-star);
+}
+
+.cockpit__spot {
+  fill: var(--color-mars-dark);
+  opacity: 0.4;
+}
+
+.cockpit__spark {
+  stroke: var(--color-spark);
+  stroke-width: 2;
+}
+
+.cockpit__layer {
+  transition: transform var(--duration-slow) var(--ease-out);
+}
+
+.cockpit__layer--far {
+  transform: translate(calc(var(--look-x) * -32px), calc(var(--look-y) * -14px));
+}
+
+.cockpit__layer--near {
+  transform: translate(calc(var(--look-x) * -75px), calc(var(--look-y) * -30px));
+}
+
+.cockpit__layer--mars {
+  transform: translate(calc(var(--look-x) * -20px), calc(var(--look-y) * -16px));
+}
+
+.cockpit__crack path {
+  stroke-dasharray: 300;
+  animation: crack-draw 0.7s ease-out both;
+}
+
+.cockpit__spark {
+  animation: spark 0.5s ease-out both;
+}
+
+.cockpit__window[data-effect='solar-particle-event']::after,
+.cockpit__window[data-effect='micrometeoroid']::after,
+.cockpit__window[data-effect='comms-blackout']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  animation: wash var(--duration-scene) ease-out forwards;
+}
+
+.cockpit__window[data-effect='solar-particle-event']::after {
+  background: radial-gradient(
+    ellipse at 0% 50%,
+    rgb(255 170 0 / 0.6),
+    rgb(255 120 0 / 0.2) 60%,
+    transparent
+  );
+}
+
+.cockpit__window[data-effect='micrometeoroid']::after {
+  background: rgb(255 255 255 / 0.35);
+}
+
+.cockpit__window[data-effect='comms-blackout']::after {
+  background: repeating-linear-gradient(0deg, rgb(255 255 255 / 0.08) 0 2px, transparent 2px 4px);
+}
+
+.cockpit__window[data-effect] {
+  animation: shake 0.6s ease-out;
+}
+
+.cockpit__effect {
+  position: absolute;
+  top: var(--space-3);
+  left: 50%;
+  max-width: calc(100% - 2rem);
+  padding: var(--space-1) var(--space-3);
+  font-family: var(--font-display);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-wide);
+  color: var(--color-warning);
+  text-align: center;
+  background: var(--color-overlay);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-md);
+  transform: translateX(-50%);
+}
+
+.cockpit__blocked {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  color: var(--color-danger);
+  text-align: center;
+  background: rgb(7 6 11 / 0.6);
+}
+
+.cockpit__blocked span {
+  max-width: 50ch;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--color-text);
+}
+
+.cockpit__progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 6px;
+  background: var(--lane);
+  transform: scaleX(var(--progress));
+  transform-origin: left;
+  opacity: 0.85;
+}
+
+.cockpit__hud {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+}
+
+@media (min-width: 768px) {
+  .cockpit__hud {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1280px) {
+  .cockpit__hud {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
+@keyframes crack-draw {
+  from {
+    stroke-dashoffset: 300;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes spark {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+}
+
+@keyframes wash {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes shake {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  20% {
+    transform: translate(-4px, 2px);
+  }
+  40% {
+    transform: translate(4px, -2px);
+  }
+  60% {
+    transform: translate(-2px, 1px);
+  }
+}

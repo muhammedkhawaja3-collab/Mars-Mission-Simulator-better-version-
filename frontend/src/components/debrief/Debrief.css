@@ -1,0 +1,14 @@
+.debrief {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.debrief__server {
+  color: var(--color-success);
+  border-color: var(--color-success);
+}
+
+.debrief__server--warn {
+  color: var(--color-warning);
+  border-color: var(--color-warning);
+}

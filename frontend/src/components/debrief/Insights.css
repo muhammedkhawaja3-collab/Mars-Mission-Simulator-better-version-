@@ -1,0 +1,41 @@
+.insights {
+  display: grid;
+  gap: var(--space-6);
+}
+
+.insights section {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.insights__title {
+  color: var(--color-accent);
+}
+
+.insights__list {
+  display: grid;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+
+.event-log__vehicle {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.event-log__name {
+  font-size: var(--text-sm);
+}
+
+.event-log__list {
+  display: grid;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.insights__sources {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}

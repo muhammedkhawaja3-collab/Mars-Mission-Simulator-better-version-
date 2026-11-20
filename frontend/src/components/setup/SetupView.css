@@ -1,0 +1,9 @@
+.setup {
+  display: grid;
+  gap: var(--space-10);
+}
+
+.setup__launch {
+  display: grid;
+  gap: var(--space-2);
+}

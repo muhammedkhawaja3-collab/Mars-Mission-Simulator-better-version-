@@ -14,9 +14,10 @@ export default defineConfig({
       manifest: {
         name: 'Mars Mission Control',
         short_name: 'Mars MMC',
-        description: 'Real-time Mars mission planning and rocket engineering simulator',
-        theme_color: '#e85d04',
-        background_color: '#020810',
+        description:
+          'Plan a crewed Earth-to-Mars mission and compare propulsion trade-offs with a patched-conic physics engine',
+        theme_color: '#07060b',
+        background_color: '#07060b',
         display: 'standalone',
         scope: '/',
         start_url: '/',
@@ -46,10 +47,16 @@ export default defineConfig({
   ],
   server: {
     port: 5173,
+    // The optional FastAPI cross-check runs on :8000 in development; the app
+    // always calls the relative /api path so production uses the same origin.
+    proxy: {
+      '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+    },
   },
   test: {
     environment: 'jsdom',
     globals: true,
     include: ['src/**/*.{test,spec}.{js,jsx}'],
+    setupFiles: ['./src/test/setup.js'],
   },
 });

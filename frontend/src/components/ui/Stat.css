@@ -1,0 +1,40 @@
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-4);
+}
+
+.stat {
+  min-width: 0;
+}
+
+.stat__label {
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+}
+
+.stat__value {
+  margin: 0;
+  font-size: var(--text-md);
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.stat__note {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.stat__value--success {
+  color: var(--color-success);
+}
+
+.stat__value--warning {
+  color: var(--color-warning);
+}
+
+.stat__value--danger {
+  color: var(--color-danger);
+}

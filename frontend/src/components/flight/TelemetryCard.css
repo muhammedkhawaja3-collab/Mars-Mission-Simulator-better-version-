@@ -1,0 +1,82 @@
+.telemetry {
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+}
+
+.telemetry__head {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.telemetry__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-md);
+}
+
+.telemetry__status {
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+
+.telemetry__status[data-status='arrived'] {
+  color: var(--color-success);
+}
+
+.telemetry__status[data-status='no-go'],
+.telemetry__status[data-status='aborted'],
+.telemetry__fail {
+  color: var(--color-danger);
+}
+
+.telemetry__fail {
+  font-size: var(--text-sm);
+}
+
+.telemetry__events {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: 0;
+  list-style: none;
+}
+
+.event-tag {
+  padding: 2px var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-info);
+  background: var(--color-info-soft);
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+}
+
+.event-tag[data-tone='warning'] {
+  color: var(--color-warning);
+  background: var(--color-warning-soft);
+}
+
+.event-tag[data-tone='danger'] {
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
+
+.telemetry__bar {
+  display: block;
+  height: 6px;
+  background: var(--color-inset);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  position: relative;
+}
+
+.telemetry__bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--card-accent);
+  transform: scaleX(var(--progress));
+  transform-origin: left;
+}

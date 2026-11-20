@@ -1,0 +1,10 @@
+dist
+dev-dist
+coverage
+node_modules
+package-lock.json
+public
+# Physics engine and the golden-fixture scripts keep their own hand formatting
+# (column-aligned source tables); they are covered by tests, not by Prettier.
+src/physics
+scripts

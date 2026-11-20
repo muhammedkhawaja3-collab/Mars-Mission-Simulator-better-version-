@@ -1,0 +1,51 @@
+.flight {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.flight__controls,
+.flight__picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.flight__alert {
+  min-height: 3rem;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  background: var(--color-warning-soft);
+  border: 1px solid var(--color-warning);
+  border-left-width: 4px;
+  border-radius: var(--radius-md);
+}
+
+.flight__alert[data-empty] {
+  /* Stay in the accessibility tree so the first alert is announced. */
+  background: transparent;
+  border-color: transparent;
+}
+
+.flight__cockpit {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.flight__telemetry {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-4);
+}
+
+@media (min-width: 768px) {
+  .flight__telemetry {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1280px) {
+  .flight__telemetry {
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  }
+}

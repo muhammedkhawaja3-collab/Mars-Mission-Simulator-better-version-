@@ -1,7 +1,4 @@
-import {
-  defineConfig,
-  minimal2023Preset as preset,
-} from '@vite-pwa/assets-generator/config';
+import { defineConfig, minimal2023Preset as preset } from '@vite-pwa/assets-generator/config';
 
 // Generates PNG app icons from the source SVG:
 //   npm run generate-pwa-assets
