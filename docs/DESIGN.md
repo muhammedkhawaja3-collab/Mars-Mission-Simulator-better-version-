@@ -2,29 +2,113 @@
 
 Status: baseline, binding. Developers build from this document. The Finish-Gate reviewer
 grades Playwright screenshots at 375, 768 and 1440 px against §13. Tokens live in
-`frontend/src/styles/tokens.css` and must match the names and values here exactly. Values
-marked **[open]** can change only through the visual-direction pick in §0.
+`frontend/src/styles/tokens.css` and must match the names and values here exactly. The
+visual direction and the open tokens are settled in §0.
 
 ## 0. Visual direction (selected)
 
-Baseline direction: **"Flight dynamics console"**. A near-black instrument surface, layered
-panels with fine 1 px borders, one warm Mars accent, one cool data accent, and numbers set like
-telemetry. Reference bar: NASA/JPL Eyes on the Solar System (calm 3D, precise labels), SpaceX
-mission-control UI (dense but quiet data), Linear/Vercel (type, spacing, state polish).
+**Selected: "Flight dynamics console" (direction A) as the base, with two grafts: B's annotated
+explanation layer and C's hero scale (without C's glass).** Decided 2026-11-20 by the Finish-Gate
+review of the three static mocks. Evidence: `docs/design-mocks/shots/direction-{a,b,c}-home-{375,1440}.png`,
+sources in `docs/design-mocks/direction-{a,b,c}/index.html`. Reference bar unchanged: NASA/JPL Eyes
+on the Solar System (calm 3D, precise labels), SpaceX mission control (dense but quiet data),
+Linear/Vercel (type, spacing, state polish).
 
-Next step: mock 2–3 directions as static HTML, screenshot them at 375 and 1440, pick one, and
-record the winner here (name, date, screenshot paths). Only these tokens are open to the pick:
+**Product lens.** The reviewer (recruiter, engineering lead, admissions) must see in 5 s that this
+is a real flight-dynamics tool: an orbit plot with dated, quantified arcs, a headline that states
+the thesis, and one obvious action. On `/plan` the first-read object is the selected plan's
+outcome ("4 crew to Mars in 198 days · feasible") next to the live trajectory; the primary action
+is "Fly mission". The trade-off story ("physics decides") is carried by side-by-side numbers, never
+by a winner.
 
-| Open token | Baseline | Allowed range |
+### Scores (1–5, 5 best; risk rows: 5 = lowest risk)
+
+| Criterion | A Console | B Editorial | C Glass | Selected hybrid |
+|---|---|---|---|---|
+| 5-second impression | 4 | 3 (375: headline below fold) | 5 | 5 |
+| Credibility to an engineering reviewer | 5 | 5 | 3 (reads "concept UI") | 5 |
+| Clarity / hierarchy / single primary action | 4 | 4 | 3 (nested panels compete) | 5 |
+| Data legibility | 5 | 5 (dot plots, annotations) | 3 (lines under translucency) | 5 |
+| Mobile quality (375) | 4 | 2 | 4 | 4 |
+| Accessibility risk | 4 | 4 | 2 (contrast varies with scene) | 4 |
+| Performance risk (Lighthouse ≥ 95) | 5 | 5 | 2 (backdrop-filter over WebGL) | 4 (full-bleed lazy 3D, poster LCP) |
+| Feasibility to build to a high standard | 5 | 3 (custom editorial layouts) | 2 | 4 |
+| **Total / 40** | **36** | **31** | **24** | **36 + stronger hero and story** |
+
+**Rationale.** A is the only mock that already looks like a tool an aerospace team would ship:
+flat 1 px panels, telemetry typography, a real three-column shell, and charts with phase markers.
+Its weakness is the risk the designer named: it is conventional, and its hero is a smaller twin of
+the plan view. B has the best *explanation*: an annotated figure that turns the orbit into
+sentences ("Leave Earth · 6 Dec 2028, one burn of 3.48 km/s"), an outcome headline that names the
+binding constraint, a Δv-budget bar, and shape-coded dot plots that make "no winner" visible. But
+B is the least app-like and at 375 it pushes the headline and button below the fold. C has the
+strongest first impression because the scene is large and the text sits on it, but its glass
+panels (`backdrop-filter: blur(14px)` over a live WebGL canvas) are a GPU and Lighthouse risk,
+make contrast depend on whatever is behind the panel, and its nested panel-in-panel-in-container
+borders read as a concept shot rather than a working console. The hybrid keeps A's shell, takes
+C's scale with an opaque scrim instead of glass, and takes B's annotation and comparison
+graphics where the trade-off story is told.
+
+### Final values for the open tokens
+
+| Open token | Final | Note |
 |---|---|---|
-| `--font-display` | Space Grotesk | Space Grotesk, IBM Plex Sans, Inter Tight |
-| `--font-text` | Inter | Inter, IBM Plex Sans |
-| `--font-mono` | JetBrains Mono | JetBrains Mono, IBM Plex Mono |
-| `--accent` hue | `#F08A4B` (Mars orange) | orange to rust, 15°–25° hue; must keep ≥ 4.5:1 on `--surface-4` |
-| Surface treatment | flat fills + 1 px borders + soft shadow | flat, or a 2–4 % top-lit gradient on `--surface-1/2` |
+| `--font-display` | **Space Grotesk** 500/600 | Mock A. Strongest aerospace character at 36–56 px. Inter Tight (C) runs letters together in the wordmark; IBM Plex (B) reads editorial. |
+| `--font-text` | **Inter** (variable) | Unchanged. |
+| `--font-mono` | **JetBrains Mono** 400/500 | Unchanged. |
+| `--accent` | **`#F08A4B`** (hover `#F59A60`, soft `rgb(240 138 75 / 0.12)`) | Unchanged baseline. B's `#EA7A4E` and C's `#EE7F45` gain nothing and would need §3 re-verification. 5.34:1 on `--surface-4`. |
+| Surface treatment | **Flat fills + 1 px borders + inset top highlight** (§5) | No gradients on surfaces, no translucency, no `backdrop-filter`. The only gradient in the product is the hero text scrim (§11). |
 
-Everything else (spacing, scale ratios, semantic colours, series colours, motion, components,
-formatting, checklist) is fixed. A changed token must be re-run through the contrast table (§3).
+The §3 contrast table needs no changes because no colour token changed.
+
+### Element map: what comes from where
+
+From **A** (base, everything not listed below):
+1. App shell, header (wordmark, nav with 2 px accent underline on active item, UTC clock in mono, Share, Mute), and the 360 / fluid / 400 three-column layout at 1440.
+2. Config panel: segmented launch window, stage cards with series-colour line swatch + status badge + Isp line, launcher select with secondary line, sliders with mono value + min/max captions, helper text under each control, full-width "Fly mission" at the panel foot.
+3. Viz panel: mono readout top-left (`r 1.12 AU · v 29.09 km/s`), mission clock top-right, legend + "1 AU" scale bar bottom-left, 2D/3D + reset bottom-right; timeline with transport controls, scrubber and phase chips (day + Δv).
+4. Telemetry small multiples with TMI / MOI phase lines, current-time cursor with value label, and "Show data table" link.
+5. Results column: overline plan label with series bar, outcome line, 2×3 stat tiles with overline labels, `est.` badges and `[n]` citations, tabs.
+6. Full comparison table with series line-style keys in column headers, units in row labels, numbered source footnotes.
+7. Hero fact strip: three flat cells divided by 1 px rules (not three floating cards).
+
+From **B** (explanation layer):
+1. Hero figure annotations: 2–3 callouts with leader lines, each a bold dated title + one plain sentence with a number ("Leave Earth · 6 Dec 2028 / One burn of 3.48 km/s sends the stack off orbit"; "Mid-cruise · day 99"; "Arrive at Mars" with three dated arrivals). Use HTML-positioned labels, not text inside a scaled SVG.
+2. Figure caption under the hero scene ("Figure 1. Patched-conic transfers computed by the simulator for 4 crew, risk tolerance 5, seed 42 …" + `[1]`), `--type-caption`, `--text-2`.
+3. Outcome headline in the results column: "Feasible, with 0.52 km/s to spare." + second line in `--text-2` naming the binding constraint ("Dose is the binding constraint."). Generated from the engine result, never hand-written.
+4. "Where the 7.34 km/s goes": horizontal Δv budget bar with value + plain label under each segment and one sentence of interpretation. Replaces A's legend-list version.
+5. "How the three stages compare" dot plots in the results column (one row per metric: transit, mission dose, cost, success), each with series colour **and** marker shape (chemical circle, nuclear diamond, starship square), value labels, axis range and "lower ← / higher →" direction caption.
+6. Comparison-section standfirst: "No winner. Each stage leads on something: …" generated from the data.
+
+From **C** (impression):
+1. Hero scale: the scene spans the full width behind the text (sun near 62 % x, Mars orbit diameter ≈ 80 % of hero height, min 560 px), not a half-width diagram. Text sits on a solid `--bg` → transparent scrim, never on glass.
+2. Header status chip "Engine ready · seed 42" (mono, `--success` dot + word) in place of A's decorative UTC clock at ≥ 1024. Hidden at 375.
+3. "Transit by stage" mini bar row with the series line-style rendered as the bar pattern (solid / dashed / dotted). Use in the Overview tab.
+4. Optional "Featured transfer" readout card on the hero at ≥ 1440 only, as an **opaque** `--surface-1` panel with 1 px `--border`; drop it if it crowds the annotations.
+
+### Must keep (graded at the finish gate)
+- Headline "Plan a crewed mission to Mars. Physics decides." with the second sentence in `--text-2`; one accent "Plan a mission" button + ghost "How it works".
+- Hero shows all three transfer arcs with distinct line styles and dated endpoints; the plan view shows only the selected plan. The two must not look like the same diagram twice: hero = comparison with annotations, plan = live playback with clock.
+- At 375, headline and primary button inside the first 812 px viewport (scene 4:3 above, as A and C do). B's figure-first order is rejected.
+- Mono for every live readout, clock, tick and coordinate; Inter tabular for stat values.
+- Series always carry colour + line style (lines) or colour + marker shape (dots/bars) + a direct label.
+- NTR card shows "Concept · never flown"; costs and success show `est.`; every sourced figure carries `[n]`.
+- Mobile sticky bottom bar "Chemical · 198 d / 2029 window · 4 crew · SLS" + "Fly mission" (all three mocks; keep it).
+
+### Must avoid (seen in the mocks)
+1. **No `backdrop-filter`, translucent panels or glass** (C). Contrast must not depend on the scene behind a panel.
+2. **Scene bleeding out of its panel** (C 1440: the outer orbit ring runs under the settings panel). The viz is clipped to its panel (`overflow: hidden`).
+3. **Panels nested three deep** (C: tile in card in panel in container). Max depth: bg → s-1 panel → s-2 card.
+4. **Labels colliding with lines** (A hero: "T+ 99 d · 29.09 km/s", "1.52 AU" and "Earth at arrival" sit on orbit lines). Labels get an 8 px offset, a leader line, or a 2 px `--bg` halo via paint-order stroke (not `text-shadow`).
+5. **SVG text that scales with the viewBox** (A/C at 375: orbit labels render well under 12 px). Labels and ticks are fixed-pixel: HTML overlay or counter-scaled, never < 12 px.
+6. **Dot-plot label collisions** (B: "1 154" vs "1 159", "85.8" vs "87.2" overlap). Close values stack above/below with a 4 px minimum gap, or merge into one label with a note.
+7. **Clipped tabs and chips without an affordance** (A 375: "Show the ma", "Cruise Day 0-"). Horizontal scrollers get an edge fade and keep the active item scrolled into view.
+8. **Cramped three-up stage cards** (C: "Concept · never flown" wraps, Isp line squeezed). Stage cards stack vertically in the 360 px panel as in A.
+9. **Off-scale type sizes** in all mocks (15, 17, 19, 21, 22 px). Use only §2 tokens.
+10. **Second accent button on a region** (A shows "Plan a mission" and "Fly mission" on one page; fine, they are separate regions; never two in one region). "Compare plans" stays secondary.
+11. Fact tiles overlapping the bottom of the scene (C crops the orbit with the tiles). The fact strip sits below the hero, full width, separated by a 1 px rule.
+12. Google Fonts `<link>` from the mocks. Production self-hosts via `@fontsource` (§2) for Lighthouse.
+13. Grey "Physics decides." must stay `--text-2` (9.03:1 on bg), not `--text-3` or lower opacity.
 
 ## 1. Principles and voice
 
@@ -331,13 +415,23 @@ keyboard focus (left/right arrows step by data point). **Accessibility**: every 
 `role="img"`, a `<title>` and one-sentence `<desc>` summary ("Propellant falls from 412 t to 0 t
 in three burns"), plus a "Show data table" toggle rendering the same series as a §8 table.
 
+**Comparison graphics** (§0, from mock B): *Δv budget bar*: one 12 px horizontal bar split into
+TMI / capture / spare segments (`--series-*` of the plan, 100 % / 60 % / `--text-3`), 2 px gaps,
+each segment labelled below with value (`--type-ui`, mono) + plain label (`--type-caption`).
+*Dot plot*: one row per metric, 1 px `--border-strong` axis, markers 8 px in series colour and
+shape (chemical circle, nuclear diamond, starship square), value labels above (or below when
+within 24 px of a neighbour), axis range and direction ("lower ←") in `--type-caption` right.
+*Transit by stage*: 6 px bars using the series line style as the fill pattern.
+
 **Telemetry set**: Velocity (heliocentric, km/s), Propellant remaining (t, steps at burns),
 Distance from Earth and to Mars (M km, two lines). Small multiples stacked, shared x-axis (days).
 
 **Trajectory view** (3D R3F lazy chunk; 2D SVG fallback with identical styling, top-down
 ecliptic): background `--bg`, no skybox texture, ≤ 400 static points of stars at 20–40 %
 opacity (none in 2D). Sun: `--sun` disc, no bloom. Orbits: 1 px `--orbit` lines; Mars orbit
-true ellipse. Earth: `--earth` sphere/dot 8 px; Mars: `--mars` 7 px. Transfer arc: 2 px in the
+true ellipse. Labels, ticks and readouts are fixed-pixel (HTML overlay or counter-scaled), never scaled with the
+SVG viewBox, never < 12 px; labels never sit on a line (offset, leader, or `paint-order` halo in
+`--bg`). The viz is clipped to its panel. Earth: `--earth` sphere/dot 8 px; Mars: `--mars` 7 px. Transfer arc: 2 px in the
 active vehicle series colour, flown part solid, remaining part 40 % opacity dashed. Spacecraft:
 6 px `--text-1` diamond with 1 px `--bg` outline. Labels: `--type-caption` `--text-2`, offset
 8 px, leader line when crowded; departure/arrival points labelled with date. Scale bar
@@ -350,24 +444,30 @@ after user interaction.
 **Landing / hero** (route `/`, above the setup):
 ```
 1440  | Header                                                                |
-      | [ Earth→Mars 3D scene, full-bleed, height 72 vh, min 560 ]             |
+      | [ Earth→Mars 3D scene, full-bleed, height 72 vh, min 560; all three  ] |
+      | [ arcs; sun ≈ 62 % x; 2–3 annotation callouts with leader lines (§0) ] |
       |   left column (5/12, vertically centred, 40 px gutter):               |
       |   overline "Earth → Mars mission simulator"                           |
       |   Display: "Plan a crewed mission to Mars. Physics decides."          |
       |   body-lg (max 52 ch): stages, launchers, same mission, real numbers  |
       |   [Plan a mission] (primary lg)   [How it works] (ghost lg)           |
       |   caption: "Ephemeris: JPL mean elements · 5 launch windows 2026–2035"|
-      | Three fact tiles row (stat-sm): 259 d Hohmann · 3.57 km/s TMI · 600 mSv|
+      |   figure caption under scene (caption, --text-2, with [1])            |
+      | Fact strip below the hero, 3 flat cells split by 1 px rules (stat-sm): |
+      |   259 d Hohmann · 3.57 km/s TMI · 600 mSv                             |
 375   | Header (logo + menu)                                                  |
       | Scene/poster 4:3, full width                                          |
       | overline, Display 36 px (3 lines max), body (3 lines), primary button |
       | full width 48 px; ghost link below; fact tiles 1 column               |
+      | Headline + primary button must sit inside the first 812 px            |
+      | Annotations collapse to dated endpoint labels only at 375             |
 ```
 Scene: lazy R3F, Earth and Mars on real orbits, transfer arc drawing over 6 s then idle drift.
 Fallback and LCP element: a pre-rendered poster (`public/hero-poster.avif` + `.webp`, 1600×900
 and 800×600, ≤ 120 kB) of the same frame. Poster shows for no WebGL, reduced motion,
-`deviceMemory ≤ 2`, and until the scene's first frame. A gradient scrim `--bg` 0 → 80 % on the
-text side keeps text ≥ 4.5:1. No particles, no lens flare.
+`deviceMemory ≤ 2`, and until the scene's first frame. A gradient scrim on the text side (solid
+`--bg` to 34 %, fading to transparent by 54 % of the width, as in mock A) keeps text ≥ 4.5:1. This
+is the only gradient in the product. No glass, no `backdrop-filter`, no particles, no lens flare.
 
 **Setup / plan** (`/plan`): config panel sections in order: Launch window (segmented by
 opposition year), In-space stage (3 cards + custom), Launch vehicle (select; incompatible
@@ -385,6 +485,11 @@ Phase chips use `--surface-3`, active `--accent-soft` + accent text. Events appe
 the scrubber and as toasts with "Gameplay model" tag; `aria-live="polite"`. Countdown (opt-in
 sound, muted by default) is a mono `T− 10` overlay, skippable. 375: viz 4:3, controls row,
 horizontal-scroll phase chips, telemetry charts stacked below.
+
+**Results column** (`/plan`, ≥ 1024): overline plan label → outcome headline from the engine
+("Feasible, with 0.52 km/s to spare." + `--text-2` line naming the binding constraint) → status
+line → stat tiles → tabs. Overview tab: Δv budget bar, "How the three stages compare" dot plots,
+transit-by-stage bars, "When each stage is the better choice" list (§10).
 
 **Debrief / results**: header row: outcome sentence ("Mission feasible · 91.4 % est. success")
 + score `742 / 1000 · B`. 4-up stat tiles (Transit, Total Δv, Propellant, Cost), then tiles
@@ -429,7 +534,7 @@ keyboard-only run and a reduced-motion run.
 
 1. [ ] No horizontal scroll at 375, 768, 1440 (`scrollWidth <= innerWidth`).
 2. [ ] Only Space Grotesk, Inter, JetBrains Mono load (or the §0 winner); no Orbitron/Share Tech.
-3. [ ] No glow, neon, text-shadow, scanlines, CRT effects or emoji anywhere.
+3. [ ] No glow, neon, text-shadow, scanlines, CRT effects, glass/`backdrop-filter` or emoji anywhere.
 4. [ ] All colours come from tokens; no hex literals in component CSS/JSX.
 5. [ ] Text sizes are only scale tokens; nothing under 12 px.
 6. [ ] Every heading, button, tab and label is sentence case (overlines excepted).
@@ -448,7 +553,7 @@ keyboard-only run and a reduced-motion run.
 19. [ ] Skip link appears on first Tab; dialogs trap focus and return it on Esc.
 20. [ ] Touch targets ≥ 44 px at 375 (sliders, chips, playback controls, tabs).
 21. [ ] Charts: horizontal gridlines only, axis titles with units, phase markers, data-table toggle.
-22. [ ] Trajectory view: sun, orbits, Earth, Mars, arc (flown solid / remaining dashed), craft marker, dated endpoints, scale bar.
+22. [ ] Trajectory view: sun, orbits, Earth, Mars, arc (flown solid / remaining dashed), craft marker, dated endpoints, scale bar; no label on a line, no label < 12 px at 375, scene clipped to its panel.
 23. [ ] Timeline shows all phases with day + Δv, and play/pause/scrub/speed work by keyboard.
 24. [ ] Loading shows skeletons of matching size; empty and error states have message + action.
 25. [ ] Infeasible plan shows the engine's reason in a warning card, never a blank panel.
@@ -457,3 +562,4 @@ keyboard-only run and a reduced-motion run.
 28. [ ] Reduced motion: no number tweening, chart reveal, auto-playback or 3D drift.
 29. [ ] Icons are lucide, consistent size/stroke, and none is purely decorative.
 30. [ ] Debrief, compare, math, sources and about pages each match their §11 wireframe.
+31. [ ] §0 must-avoid list: none of the 13 pitfalls is visible at 375, 768 or 1440.

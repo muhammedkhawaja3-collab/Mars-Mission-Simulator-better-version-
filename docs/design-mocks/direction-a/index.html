@@ -1,0 +1,638 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mars Mission Simulator · Direction A</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<style>
+/* Direction A: Flight dynamics console. Flat fills, 1 px borders, dense and precise. */
+:root{
+  color-scheme: dark;
+  --font-display:'Space Grotesk','Inter',system-ui,sans-serif;
+  --font-text:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,Menlo,monospace;
+  --bg:#0A0C10; --surface-1:#11151A; --surface-2:#171C23; --surface-3:#1F252E; --surface-4:#29303B;
+  --border-subtle:#222831; --border:#2E3540; --border-strong:#717B8B;
+  --text-1:#ECEFF3; --text-2:#A8B1BD; --text-3:#949DA9;
+  --accent:#F08A4B; --accent-hover:#F59A60; --accent-soft:rgb(240 138 75 / .12); --on-accent:#0A0C10;
+  --data:#4FD1C5; --data-soft:rgb(79 209 197 / .12);
+  --success:#4CC38A; --warning:#E9B949; --danger:#F2705F; --info:#7DA8F5;
+  --series-chemical:#56B4E9; --series-nuclear:#D58AC0; --series-starship:#F0E442;
+  --sun:#F5D27A; --earth:#4F8FE0; --mars:#C1532A; --orbit:#3A4250; --focus:#4FD1C5;
+  --radius-sm:4px; --radius-md:6px; --radius-lg:10px; --radius-full:999px;
+  --shadow-1:0 1px 2px rgb(0 0 0 / .30); --shadow-2:0 4px 12px rgb(0 0 0 / .35);
+  --hi:inset 0 1px 0 rgb(255 255 255 / .03);
+  --gutter:40px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{background:var(--bg)}
+body{background:var(--bg);color:var(--text-1);font:400 16px/1.6 var(--font-text);font-feature-settings:'cv11','ss01';-webkit-font-smoothing:antialiased}
+svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+svg.i.lg{width:20px;height:20px;stroke-width:1.75}
+.num{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--font-mono)}
+.overline{font:600 12px/1.35 var(--font-text);letter-spacing:.08em;text-transform:uppercase;color:var(--text-3)}
+.caption{font-size:13px;line-height:1.45;color:var(--text-2)}
+.unit{color:var(--text-2)}
+a{color:var(--data);text-decoration:none}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.cite{font:400 12px/1 var(--font-mono);color:var(--data);vertical-align:super;margin-left:2px}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 16px;border-radius:var(--radius-md);font:500 14px/1 var(--font-text);border:1px solid transparent;cursor:pointer;color:var(--text-1);background:none;white-space:nowrap}
+.btn.lg{height:48px;padding:0 20px;font-size:16px}
+.btn.sm{height:32px;padding:0 12px}
+.btn.primary{background:var(--accent);color:var(--on-accent);font-weight:600}
+.btn.primary:hover{background:var(--accent-hover)}
+.btn.secondary{background:var(--surface-3);border-color:var(--border-strong)}
+.btn.ghost{color:var(--text-2)}
+.btn.ghost:hover{background:var(--surface-3);color:var(--text-1)}
+.btn.icon{width:32px;padding:0;justify-content:center}
+
+/* header */
+header.top{position:sticky;top:0;z-index:20;height:56px;background:var(--surface-1);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:32px;padding:0 var(--gutter)}
+.brand{display:flex;align-items:center;gap:12px;font:600 16px/1 var(--font-display);letter-spacing:-.01em;color:var(--text-1)}
+.brand small{font:400 12px/1 var(--font-mono);color:var(--text-3);letter-spacing:0}
+nav.main{display:flex;gap:4px}
+nav.main a{color:var(--text-2);font:500 14px/1 var(--font-text);padding:10px 12px;border-radius:var(--radius-md);position:relative}
+nav.main a[aria-current]{color:var(--text-1)}
+nav.main a[aria-current]::after{content:"";position:absolute;left:12px;right:12px;bottom:-9px;height:2px;background:var(--accent)}
+.top .right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.utc{font:400 12px/1 var(--font-mono);color:var(--text-3);margin-right:8px}
+.menu-btn{display:none}
+
+/* hero */
+.hero{position:relative;height:72vh;min-height:600px;overflow:hidden;border-bottom:1px solid var(--border);background:var(--bg)}
+.hero-scene{position:absolute;inset:0 0 64px 36%;}
+.hero-scene svg{width:100%;height:100%;display:block}
+.hero::before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,var(--bg) 0%,var(--bg) 34%,rgb(10 12 16 / .7) 44%,rgb(10 12 16 / 0) 54%);z-index:1;pointer-events:none}
+.hero-copy{position:relative;z-index:2;height:100%;display:flex;flex-direction:column;justify-content:center;padding:0 var(--gutter);max-width:calc(5/12*1440px + 40px)}
+.hero-copy .overline{color:var(--accent);margin-bottom:20px;display:flex;align-items:center;gap:10px}
+.hero-copy .overline::before{content:"";width:24px;height:1px;background:var(--accent)}
+h1.display{font:600 56px/1.05 var(--font-display);letter-spacing:-.02em;margin-bottom:24px}
+h1.display span{color:var(--text-2)}
+.lead{font-size:18px;line-height:1.6;color:var(--text-2);max-width:52ch;margin-bottom:32px}
+.cta{display:flex;gap:12px;align-items:center;margin-bottom:24px}
+.hero-meta{font:400 12px/1.4 var(--font-mono);color:var(--text-3);display:flex;gap:16px;flex-wrap:wrap}
+.hero-meta b{color:var(--text-2);font-weight:400}
+.facts{position:absolute;z-index:2;left:0;right:0;padding:0 var(--gutter);background:var(--bg);bottom:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:1px solid var(--border)}
+.fact{padding:16px 24px 20px 0;display:flex;align-items:baseline;gap:12px}
+.fact + .fact{padding-left:24px;border-left:1px solid var(--border-subtle)}
+.fact .v{font:500 20px/1.2 var(--font-text);font-variant-numeric:tabular-nums}
+.fact .v .unit{font-size:14px}
+.fact .l{font-size:13px;color:var(--text-2)}
+.hkey{display:grid;gap:6px;margin-top:12px;justify-items:end;font:500 13px/1 var(--font-text);color:var(--text-2)}
+.hkey span{display:flex;align-items:center;gap:8px}.hkey svg{width:24px;height:4px}
+.scene-legend{position:absolute;z-index:2;right:var(--gutter);top:24px;font:400 12px/1.4 var(--font-mono);color:var(--text-3);text-align:right}
+
+/* trajectory scene styles (shared svg classes) */
+.orbit{fill:none;stroke:var(--orbit);stroke-width:1}
+.grid-ring{fill:none;stroke:var(--border-subtle);stroke-width:1}
+.tick{font:400 12px/1 var(--font-mono);fill:var(--text-3)}
+.lbl{font:400 13px/1 var(--font-text);fill:var(--text-2)}
+.lbl-strong{font:500 13px/1 var(--font-text);fill:var(--text-1)}
+.lbl-mono{font:400 12px/1 var(--font-mono);fill:var(--text-3)}
+.arc-flown{fill:none;stroke-width:2;stroke-linecap:round}
+.arc-rem{fill:none;stroke-width:2;stroke-dasharray:6 5;opacity:.4}
+.leader{stroke:var(--border-strong);stroke-width:1;fill:none}
+.star{fill:#fff}
+
+/* app shell */
+.shell-head{display:flex;align-items:end;justify-content:space-between;gap:24px;padding:48px var(--gutter) 20px}
+.shell-head h2{font:600 24px/1.25 var(--font-display);letter-spacing:-.01em}
+.shell-head p{color:var(--text-2);font-size:14px;margin-top:4px}
+.crumbs{display:flex;gap:8px;align-items:center}
+.shell{display:grid;grid-template-columns:360px minmax(640px,1fr) 400px;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.panel{background:var(--surface-1);min-width:0}
+.panel.config{border-right:1px solid var(--border)}
+.panel.results{border-left:1px solid var(--border)}
+.panel-h{height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;border-bottom:1px solid var(--border-subtle)}
+.sheet-handle{display:none}
+.grp{padding:20px;border-bottom:1px solid var(--border-subtle)}
+.grp .row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+.lab{font:500 14px/1.45 var(--font-text);color:var(--text-1)}
+.val{font:400 14px/1.5 var(--font-mono);color:var(--text-1)}
+.val .unit{color:var(--text-2)}
+.seg{display:flex;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-md);padding:2px;gap:2px}
+.seg button{flex:1;height:32px;border:0;background:none;color:var(--text-2);font:500 14px/1 var(--font-text);border-radius:4px;cursor:pointer;font-variant-numeric:tabular-nums}
+.seg button[aria-checked=true]{background:var(--surface-4);color:var(--text-1);box-shadow:var(--shadow-1)}
+.help{font-size:13px;line-height:1.45;color:var(--text-3);margin-top:8px}
+.slider{position:relative;height:24px;margin:4px 0 2px}
+.slider .track{position:absolute;left:0;right:0;top:10px;height:4px;border-radius:2px;background:var(--border-strong)}
+.slider .fill{position:absolute;left:0;top:10px;height:4px;border-radius:2px;background:var(--accent)}
+.slider .thumb{position:absolute;top:4px;width:16px;height:16px;margin-left:-8px;border-radius:50%;background:var(--text-1);box-shadow:0 0 0 1px var(--bg),var(--shadow-1)}
+.minmax{display:flex;justify-content:space-between;font:400 12px/1.4 var(--font-mono);color:var(--text-3)}
+.stage-list{display:grid;gap:8px}
+.stage{display:grid;grid-template-columns:1fr auto;gap:2px 12px;padding:12px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface-2);box-shadow:var(--hi)}
+.stage[aria-checked=true]{border-color:var(--accent);background:linear-gradient(var(--accent-soft),var(--accent-soft)),var(--surface-2)}
+.stage .n{font:500 14px/1.45 var(--font-text);display:flex;align-items:center;gap:8px}
+.stage .n .sw{width:12px;height:2px;border-radius:1px}
+.stage .spec{font:400 12px/1.4 var(--font-mono);color:var(--text-2);grid-column:1/-1}
+.stage .chk{color:var(--accent);display:flex;align-items:center;gap:6px}
+.badge{display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 6px;border-radius:var(--radius-sm);font:600 12px/1 var(--font-text);letter-spacing:.04em}
+.badge::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.badge.ok{color:var(--success);background:rgb(76 195 138 / .12)}
+.badge.test{color:var(--info);background:rgb(125 168 245 / .12)}
+.badge.concept{color:var(--text-2);background:var(--surface-3)}
+.est{display:inline-flex;align-items:center;height:18px;padding:0 5px;border:1px solid var(--border-strong);border-radius:var(--radius-sm);font:500 12px/1 var(--font-text);color:var(--text-2);text-transform:lowercase;letter-spacing:0}
+.select{display:flex;align-items:center;justify-content:space-between;height:44px;padding:0 12px;background:var(--surface-2);border:1px solid var(--border-strong);border-radius:var(--radius-md)}
+.select .t{font:500 14px/1.2 var(--font-text)}
+.select .s{font:400 12px/1.3 var(--font-mono);color:var(--text-3)}
+.config-foot{padding:20px;display:grid;gap:8px}
+.config-foot .btn{width:100%;justify-content:center}
+
+/* viz */
+.viz-col{display:flex;flex-direction:column;min-width:0;background:var(--bg)}
+.viz{position:relative;aspect-ratio:4/3;min-height:420px;border-bottom:1px solid var(--border);overflow:hidden}
+.viz svg.scene{position:absolute;inset:0;width:100%;height:100%}
+.viz .hud{position:absolute;left:16px;top:16px;display:grid;gap:2px;font:400 12px/1.5 var(--font-mono);color:var(--text-3)}
+.viz .hud b{font-weight:400;color:var(--text-1)}
+.viz .clock{position:absolute;right:16px;top:16px;text-align:right}
+.viz .clock .t{font:500 20px/1.2 var(--font-mono);color:var(--text-1);font-variant-numeric:tabular-nums}
+.viz .ctrls{position:absolute;right:16px;bottom:16px;display:flex;gap:8px;align-items:center}
+.viz .ctrls .seg{background:rgb(17 21 26 / .9)}
+.viz .ctrls .seg button{padding:0 12px}
+.viz .scalebar{position:absolute;left:16px;bottom:16px;font:400 12px/1 var(--font-mono);color:var(--text-2)}
+.viz .scalebar i{display:block;height:6px;border:1px solid var(--text-3);border-top:0;margin-bottom:6px}
+.series-key{position:absolute;left:16px;bottom:48px;display:grid;gap:6px;font:500 13px/1 var(--font-text);color:var(--text-2)}
+.series-key span{display:flex;align-items:center;gap:8px}
+.series-key svg{width:24px;height:4px}
+
+.timeline{padding:16px 20px 20px;border-bottom:1px solid var(--border);background:var(--surface-1)}
+.tl-row{display:flex;align-items:center;gap:8px}
+.tl-row .spacer{flex:1}
+.tl-row .mono{font-size:14px;color:var(--text-1)}
+.scrub{position:relative;height:28px;margin:12px 0 8px}
+.scrub .track{position:absolute;left:0;right:0;top:13px;height:2px;background:var(--border-strong);border-radius:1px}
+.scrub .done{position:absolute;left:0;top:13px;height:2px;background:var(--data);width:50%}
+.scrub .mk{position:absolute;top:7px;width:2px;height:14px;background:var(--text-2)}
+.scrub .head{position:absolute;top:8px;left:50%;width:12px;height:12px;margin-left:-6px;border-radius:50%;background:var(--data);box-shadow:0 0 0 2px var(--surface-1)}
+.phases{display:flex;gap:8px;overflow-x:auto}
+.chip{flex:none;display:grid;gap:2px;padding:8px 12px;border-radius:var(--radius-md);background:var(--surface-3);min-width:120px}
+.chip .p{font:500 13px/1.3 var(--font-text);color:var(--text-1)}
+.chip .d{font:400 12px/1.4 var(--font-mono);color:var(--text-2)}
+.chip.active{background:var(--accent-soft)}
+.chip.active .p{color:var(--accent)}
+
+.charts{display:grid;grid-template-columns:1fr;gap:0;flex:1}
+.chart{padding:16px 20px 20px;min-width:0}
+.chart + .chart{border-top:1px solid var(--border-subtle)}
+.chart-h{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+.chart-h .t{font:500 14px/1.45 var(--font-text)}
+.chart svg{width:100%;height:auto;display:block;overflow:visible}
+.chart text{font:400 13px/1 var(--font-mono);fill:var(--text-3)}
+.gl{stroke:var(--border-subtle);stroke-width:1}
+.base{stroke:var(--border);stroke-width:1}
+.phase-line{stroke:var(--border-strong);stroke-width:1;stroke-dasharray:3 3}
+.tbl-toggle{font:500 13px/1 var(--font-text);color:var(--data)}
+
+/* results */
+.res-head{padding:20px;border-bottom:1px solid var(--border-subtle)}
+.res-head .plan{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.res-head .plan .bar{width:4px;height:16px;border-radius:2px;background:var(--series-chemical)}
+.res-head h3{font:600 18px/1.35 var(--font-text)}
+.outcome{display:flex;align-items:center;gap:8px;font:500 14px/1.45 var(--font-text);color:var(--success)}
+.outcome .muted{color:var(--text-2);font-weight:400}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border-subtle);border-bottom:1px solid var(--border-subtle)}
+.tile{background:var(--surface-1);padding:16px 20px;min-width:0}
+.tile .top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.tile .v{font:500 32px/1.1 var(--font-text);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.tile .v .unit{font-size:19px;margin-left:2px}
+.tile .d{font-size:13px;color:var(--text-2);margin-top:6px;display:flex;align-items:center;gap:4px}
+.tile .d.warn{color:var(--warning)}
+.tabs{display:flex;gap:4px;padding:0 20px;border-bottom:1px solid var(--border-subtle);overflow-x:auto}
+.tabs button{flex:none;height:40px;padding:0 8px;background:none;border:0;color:var(--text-2);font:500 14px/1 var(--font-text);position:relative;cursor:pointer}
+.tabs button[aria-selected=true]{color:var(--text-1)}
+.tabs button[aria-selected=true]::after{content:"";position:absolute;left:8px;right:8px;bottom:-1px;height:2px;background:var(--accent)}
+.budget{padding:20px;display:grid;gap:14px}
+.budget .bh{display:flex;justify-content:space-between;font:500 14px/1.45 var(--font-text)}
+.stack{display:flex;height:8px;border-radius:2px;overflow:hidden;gap:2px}
+.stack i{display:block;height:100%}
+.brow{display:grid;grid-template-columns:12px 1fr auto;gap:8px;align-items:center;font-size:14px;color:var(--text-2)}
+.brow .sw{width:10px;height:10px;border-radius:2px}
+.brow .num{color:var(--text-1);font-family:var(--font-mono);font-size:14px}
+.note{margin:0 20px 20px;padding:12px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface-2);display:grid;grid-template-columns:16px 1fr;gap:10px;font-size:13px;line-height:1.45;color:var(--text-2)}
+.note svg{color:var(--warning);margin-top:2px}
+
+/* comparison */
+.compare{padding:48px var(--gutter) 64px}
+.compare-h{display:flex;justify-content:space-between;align-items:end;margin-bottom:16px;gap:16px}
+.compare-h h2{font:600 24px/1.25 var(--font-display);letter-spacing:-.01em}
+.compare-h p{font-size:14px;color:var(--text-2);margin-top:4px}
+.tbl-wrap{border:1px solid var(--border);border-radius:var(--radius-lg);overflow:auto;background:var(--surface-1)}
+table{width:100%;border-collapse:collapse;font:500 14px/1.45 var(--font-text)}
+th,td{height:40px;padding:0 16px;border-bottom:1px solid var(--border-subtle);white-space:nowrap}
+thead th{background:var(--surface-1);font:600 12px/1.35 var(--font-text);letter-spacing:.08em;text-transform:uppercase;color:var(--text-3);text-align:right;height:auto;padding-top:14px;padding-bottom:12px;vertical-align:bottom}
+thead th:first-child{text-align:left}
+thead th .ser{display:flex;align-items:center;justify-content:flex-end;gap:8px;text-transform:none;letter-spacing:0;font:600 14px/1.3 var(--font-text);color:var(--text-1);margin-bottom:4px}
+thead th .ser svg{width:20px;height:4px}
+thead th .sub{text-transform:none;letter-spacing:0;font:400 12px/1.3 var(--font-text);color:var(--text-3);display:block}
+td{text-align:right;font-variant-numeric:tabular-nums;color:var(--text-1)}
+td:first-child{text-align:left;color:var(--text-2);font-weight:500}
+tbody tr:hover td{background:var(--surface-2)}
+tbody tr:last-child td{border-bottom:0}
+td .est{margin-left:6px}
+.sources{margin-top:16px;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:16px;font-size:13px;line-height:1.45;color:var(--text-3)}
+.sources b{font:400 12px/1 var(--font-mono);color:var(--data);margin-right:6px}
+.foot{padding:24px var(--gutter) 40px;border-top:1px solid var(--border);font-size:13px;color:var(--text-3);display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.bottom-bar{display:none}
+.swipe{display:none;font-size:13px;color:var(--text-3);padding:0 0 12px}
+
+/* ---------- responsive ---------- */
+@media (max-width:1279px){
+  .shell{grid-template-columns:320px 1fr}
+  .panel.results{grid-column:2;border-left:0;border-top:1px solid var(--border)}
+}
+@media (max-width:767px){
+  :root{--gutter:16px}
+  header.top{gap:12px}
+  nav.main,.utc,.top .right .btn.ghost{display:none}
+  .menu-btn{display:inline-flex;margin-left:auto}
+  .brand small{display:none}
+  .hero{height:auto;min-height:0;display:flex;flex-direction:column}
+  .hero::before{display:none}
+  .hero-scene{position:relative;inset:auto;aspect-ratio:4/3;width:100%}
+  .hkey{display:grid;gap:6px;margin-top:12px;justify-items:end;font:500 13px/1 var(--font-text);color:var(--text-2)}
+.hkey span{display:flex;align-items:center;gap:8px}.hkey svg{width:24px;height:4px}
+.scene-legend{display:none}
+  .hero-copy{height:auto;padding:24px 16px 0;max-width:none}
+  h1.display{font-size:36px}
+  .lead{font-size:16px;margin-bottom:24px}
+  .cta{flex-direction:column;align-items:stretch}
+  .cta .btn{justify-content:center}
+  .facts{position:static;grid-template-columns:1fr;margin:24px 16px 0}
+  .fact,.fact + .fact{padding:12px 0;border-left:0;border-bottom:1px solid var(--border-subtle)}
+  .fact:last-child{border-bottom:0}
+  .shell-head{padding:48px 16px 16px;flex-direction:column;align-items:flex-start}
+  .crumbs{display:none}
+  .shell{display:flex;flex-direction:column}
+  .viz-col{order:1}
+  .panel.results{order:2;border-top:0}
+  .panel.config{order:3;border-right:0;border-top:1px solid var(--border);border-radius:var(--radius-lg) var(--radius-lg) 0 0;box-shadow:0 -16px 40px rgb(0 0 0 / .45);margin-top:16px}
+  .hide-sm{display:none}
+  .hero-scene svg text{font-size:21px}
+  .viz svg text{font-size:22px}
+  .sheet-handle{display:block;width:32px;height:4px;border-radius:2px;background:var(--border-strong);margin:8px auto 0}
+  .config-foot{display:none}
+  .viz{aspect-ratio:4/3;min-height:0}
+  .viz .hud{font-size:12px}
+  .viz .hud .wide,.series-key{display:none}
+  .viz .clock .t{font-size:14px}
+  .viz .ctrls .seg{display:none}
+  .charts{grid-template-columns:1fr}
+  .chart + .chart{border-left:0;border-top:1px solid var(--border-subtle)}
+  .tile{padding:16px}
+  .tile .v{font-size:28px}
+  .tile .v .unit{font-size:17px}
+  .compare{padding:48px 16px 48px}
+  .compare-h{flex-direction:column;align-items:flex-start}
+  th:first-child,td:first-child{position:sticky;left:0;background:var(--surface-1);z-index:1;box-shadow:1px 0 0 var(--border)}
+  .sources{grid-template-columns:1fr}
+  .tbl-wrap{-webkit-mask-image:linear-gradient(90deg,#000 84%,transparent);mask-image:linear-gradient(90deg,#000 84%,transparent)}
+  .swipe{display:block}
+  .foot{padding-bottom:24px}
+  .chart text{font-size:24px}
+  .chart text.xt-odd{display:none}
+  .hero-scene svg text.mv-sm{transform:translateX(-36px)}
+  .tl-row .speed{display:none}
+  .tl-row .mono{white-space:nowrap}
+  .viz svg text.r-sm{text-anchor:end;transform:translateX(-24px)}
+  .bottom-bar{display:flex;position:relative;left:0;right:0;bottom:0;height:64px;z-index:20;background:var(--surface-1);border-top:1px solid var(--border);align-items:center;gap:12px;padding:0 16px}
+  .bottom-bar .sum{flex:1;min-width:0;font-size:13px;line-height:1.35;color:var(--text-2)}
+  .bottom-bar .sum b{display:block;color:var(--text-1);font-weight:500;font-size:14px}
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></symbol>
+  <symbol id="i-reset" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" x2="5" y1="19" y2="5"/></symbol>
+  <symbol id="i-fwd" viewBox="0 0 24 24"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" x2="19" y1="5" y2="19"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+  <symbol id="i-mute" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="22" x2="16" y1="9" y2="15"/><line x1="16" x2="22" y1="9" y2="15"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></symbol>
+</svg>
+
+<header class="top">
+  <a class="brand" href="#">
+    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="var(--orbit)" stroke-width="1.5"/><circle cx="12" cy="12" r="3" fill="var(--sun)"/><circle cx="20.5" cy="7" r="2.2" fill="var(--accent)"/></svg>
+    Mars Mission Simulator <small>v8</small>
+  </a>
+  <nav class="main" aria-label="Main">
+    <a href="#" aria-current="page">Plan</a><a href="#">Compare</a><a href="#">Sources</a><a href="#">About</a>
+  </nav>
+  <div class="right">
+    <span class="utc num">UTC 23:13:11</span>
+    <button class="btn ghost sm"><svg class="i"><use href="#i-share"/></svg>Share</button>
+    <button class="btn ghost sm icon" aria-label="Sound off"><svg class="i"><use href="#i-mute"/></svg></button>
+    <button class="btn ghost icon menu-btn" aria-label="Open menu" style="width:44px;height:44px"><svg class="i lg"><use href="#i-menu"/></svg></button>
+  </div>
+</header>
+
+<main>
+<section class="hero" aria-labelledby="hero-h">
+  <div class="hero-scene" aria-hidden="true">
+    <svg viewBox="-300 -255 600 510" preserveAspectRatio="xMidYMid meet">
+      <g class="stars" data-n="220" data-w="660" data-h="560"></g>
+      <circle r="75" class="grid-ring"/><circle r="225" class="grid-ring" stroke-dasharray="2 4"/>
+      <line x1="-300" y1="0" x2="300" y2="0" class="grid-ring"/><line x1="0" y1="-260" x2="0" y2="260" class="grid-ring"/>
+      <text x="6" y="-155" class="tick hide-sm">1.00 AU</text>
+      <text x="6" y="-232" class="tick hide-sm">1.52 AU</text>
+      <circle r="150" class="orbit"/>
+      <ellipse cx="-21.35" cy="0" rx="228.6" ry="227.6" class="orbit"/>
+      <!-- other vehicles, faint -->
+      <path d="M-129.9 75 A 240 236 150 0 0 195.7 71.2" class="arc-flown" stroke="var(--series-nuclear)" stroke-dasharray="6 4" opacity=".55"/>
+      <path d="M-129.9 75 A 186 183 150 0 0 206.5 -18.1" class="arc-flown" stroke="var(--series-starship)" stroke-dasharray="2 3" opacity=".55"/>
+      <!-- selected: chemical -->
+      <path d="M43.6 162.8 A181.6 178.8 150 0 0 207.3 0" class="arc-rem" stroke="var(--series-chemical)"/>
+      <path d="M-129.9 75 A181.6 178.8 150 0 0 43.6 162.8" class="arc-flown" stroke="var(--series-chemical)"/>
+      <circle r="11" fill="var(--sun)"/>
+      <circle cx="106" cy="-106" r="4" fill="none" stroke="var(--earth)" stroke-width="1" opacity=".7"/>
+      <circle cx="-56.1" cy="224.9" r="3.5" fill="none" stroke="var(--mars)" stroke-width="1"/>
+      <circle cx="-129.9" cy="75" r="5" fill="var(--earth)"/>
+      <circle cx="207.3" cy="0" r="4.5" fill="var(--mars)"/>
+      <path d="M43.6 157.8 l5 5 -5 5 -5 -5z" fill="var(--text-1)" stroke="var(--bg)" stroke-width="1"/>
+      <path d="M-133 81 L-150 112" class="leader"/>
+      <text x="-150" y="130" class="lbl-strong" text-anchor="middle">Earth departure</text>
+      <text x="-150" y="150" class="lbl-mono" text-anchor="middle">6 Dec 2028</text>
+      <path d="M212 4 L240 40 L300 40" class="leader"/>
+      <text x="300" y="32" class="lbl-strong mv-sm" text-anchor="end">Mars arrival</text>
+      <text x="300" y="58" class="lbl-mono mv-sm" text-anchor="end">22 Jun 2029</text>
+      <text x="43.6" y="190" class="lbl-mono hide-sm" text-anchor="middle">T+ 99 d · 29.09 km/s</text>
+      <text x="0" y="-20" class="lbl-mono" text-anchor="middle">Sun</text>
+    </svg>
+  </div>
+  <div class="scene-legend">Heliocentric · ecliptic plane, top-down<br>Patched-conic transfers, 2029 window
+    <div class="hkey"><span><svg viewBox="0 0 24 4"><line x1="0" y1="2" x2="24" y2="2" stroke="var(--series-chemical)" stroke-width="2"/></svg>Chemical · 198 d</span><span><svg viewBox="0 0 24 4"><line x1="0" y1="2" x2="24" y2="2" stroke="var(--series-nuclear)" stroke-width="2" stroke-dasharray="6 4"/></svg>Nuclear thermal · 160 d</span><span><svg viewBox="0 0 24 4"><line x1="0" y1="2" x2="24" y2="2" stroke="var(--series-starship)" stroke-width="2" stroke-dasharray="2 3"/></svg>Starship · 206 d</span></div></div>
+  <div class="hero-copy">
+    <p class="overline">Earth → Mars mission simulator</p>
+    <h1 class="display" id="hero-h">Plan a crewed mission to Mars. <span>Physics decides.</span></h1>
+    <p class="lead">Pick a launch window, an in-space stage and a launcher. Every option flies the same mission through a patched-conic engine, and every number shows its source.</p>
+    <div class="cta">
+      <a class="btn primary lg" href="#plan">Plan a mission<svg class="i lg"><use href="#i-arrow"/></svg></a>
+      <a class="btn ghost lg" href="#">How it works</a>
+    </div>
+    <p class="hero-meta"><span>Ephemeris <b>JPL mean elements</b></span><span><b>5</b> launch windows 2026–2035</span></p>
+  </div>
+  <div class="facts">
+    <div class="fact"><span class="v">259<span class="unit"> d</span></span><span class="l">Hohmann transit, Earth to Mars</span></div>
+    <div class="fact"><span class="v">3.57<span class="unit"> km/s</span></span><span class="l">Trans-Mars injection from LEO</span></div>
+    <div class="fact"><span class="v">600<span class="unit"> mSv</span></span><span class="l">NASA career dose limit<span class="cite">[5]</span></span></div>
+  </div>
+</section>
+
+<div class="shell-head" id="plan">
+  <div>
+    <h2>Mission plan</h2>
+    <p>Same mission for every stage. Results update as you change settings.</p>
+  </div>
+  <div class="crumbs">
+    <button class="btn ghost sm"><svg class="i"><use href="#i-reset"/></svg>Reset</button>
+    <button class="btn secondary sm">Compare plans</button>
+  </div>
+</div>
+
+<div class="shell">
+  <!-- CONFIG -->
+  <aside class="panel config" aria-label="Mission settings">
+    <div class="sheet-handle"></div>
+    <div class="panel-h"><span class="overline">Mission settings</span><span class="caption mono">Seed 42</span></div>
+    <div class="grp">
+      <div class="row"><span class="lab">Launch window</span><span class="val">Departs Dec 2028</span></div>
+      <div class="seg" role="radiogroup" aria-label="Launch window">
+        <button role="radio" aria-checked="false">2027</button><button role="radio" aria-checked="true">2029</button><button role="radio" aria-checked="false">2031</button><button role="radio" aria-checked="false">2033</button><button role="radio" aria-checked="false">2035</button>
+      </div>
+      <p class="help">Named by Mars opposition. Windows repeat every 26 months.</p>
+    </div>
+    <div class="grp">
+      <div class="row"><span class="lab">In-space stage</span><a class="caption" href="#">Custom</a></div>
+      <div class="stage-list" role="radiogroup" aria-label="In-space stage">
+        <div class="stage" role="radio" aria-checked="true">
+          <span class="n"><span class="sw" style="background:var(--series-chemical)"></span>Chemical</span>
+          <span class="chk"><span class="badge ok">Operational</span><svg class="i"><use href="#i-check"/></svg></span>
+          <span class="spec">LH₂/LOX · RL10-class · Isp 460 s<span class="cite">[2]</span></span>
+        </div>
+        <div class="stage" role="radio" aria-checked="false">
+          <span class="n"><span class="sw" style="background:var(--series-nuclear)"></span>Nuclear thermal</span>
+          <span class="badge concept">Concept · never flown</span>
+          <span class="spec">NERVA-derived · Isp 900 s</span>
+        </div>
+        <div class="stage" role="radio" aria-checked="false">
+          <span class="n"><span class="sw" style="background:var(--series-starship)"></span>Starship</span>
+          <span class="badge test">Flight test</span>
+          <span class="spec">Raptor Vacuum · CH₄/LOX · Isp 380 s</span>
+        </div>
+      </div>
+    </div>
+    <div class="grp">
+      <div class="row"><span class="lab">Launch vehicle</span></div>
+      <div class="select"><div><div class="t">SLS Block 1</div><div class="s">95.0 t to LEO · operational</div></div><svg class="i"><use href="#i-chev"/></svg></div>
+    </div>
+    <div class="grp">
+      <div class="row"><span class="lab">Crew</span><span class="val num">4 <span class="unit">crew</span></span></div>
+      <div class="slider" role="slider" aria-valuenow="4" aria-valuemin="2" aria-valuemax="8" aria-valuetext="4 crew"><div class="track"></div><div class="fill" style="width:33.3%"></div><div class="thumb" style="left:33.3%"></div></div>
+      <div class="minmax"><span>2</span><span>8</span></div>
+      <p class="help">33.0 t habitat · 3.06 kg consumables per crew-day</p>
+    </div>
+    <div class="grp">
+      <div class="row"><span class="lab">Transfer</span><span class="val num">198 <span class="unit">d</span></span></div>
+      <div class="seg" role="radiogroup" aria-label="Transfer"><button role="radio" aria-checked="true">Fastest</button><button role="radio" aria-checked="false">Hohmann</button><button role="radio" aria-checked="false">Set time</button></div>
+      <p class="help">Each stage burns its full load, minus the reserve, on the fastest transfer it can fly.</p>
+    </div>
+    <div class="grp">
+      <div class="row"><span class="lab">Risk tolerance</span><span class="val num">5 <span class="unit">/ 10</span></span></div>
+      <div class="slider" role="slider" aria-valuenow="5" aria-valuemin="1" aria-valuemax="10" aria-valuetext="5 of 10"><div class="track"></div><div class="fill" style="width:44.4%"></div><div class="thumb" style="left:44.4%"></div></div>
+      <div class="minmax"><span>1</span><span>10</span></div>
+      <p class="help">Balanced · Δv reserve 8.0 %</p>
+    </div>
+    <div class="config-foot">
+      <button class="btn primary"><svg class="i lg"><use href="#i-play"/></svg>Fly mission</button>
+    </div>
+  </aside>
+
+  <!-- VIZ -->
+  <section class="viz-col" aria-label="Trajectory">
+    <div class="viz">
+      <svg class="scene" viewBox="-320 -250 640 500" preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="vt vd">
+        <title id="vt">Earth to Mars transfer, chemical stage</title>
+        <desc id="vd">Departs Earth 6 Dec 2028, arrives Mars 22 Jun 2029 after 198 days; spacecraft at day 99.</desc>
+        <g class="stars" data-n="140" data-w="640" data-h="500"></g>
+        <circle r="150" class="orbit"/>
+        <ellipse cx="-21.35" cy="0" rx="228.6" ry="227.6" class="orbit"/>
+        <path d="M43.6 162.8 A181.6 178.8 150 0 0 207.3 0" class="arc-rem" stroke="var(--series-chemical)"/>
+        <path d="M-129.9 75 A181.6 178.8 150 0 0 43.6 162.8" class="arc-flown" stroke="var(--series-chemical)"/>
+        <circle r="10" fill="var(--sun)"/>
+        <circle cx="106" cy="-106" r="4" fill="none" stroke="var(--earth)" opacity=".7"/>
+        <text x="114" y="-112" class="lbl-mono hide-sm">Earth at arrival</text>
+        <circle cx="-129.9" cy="75" r="5" fill="var(--earth)"/>
+        <circle cx="207.3" cy="0" r="4.5" fill="var(--mars)"/>
+        <path d="M43.6 157.8 l5 5 -5 5 -5 -5z" fill="var(--text-1)" stroke="var(--bg)"/>
+        <text x="-140" y="98" class="lbl" text-anchor="end">Earth</text>
+        <text x="-140" y="114" class="lbl-mono" text-anchor="end">6 Dec 2028</text>
+        <text x="218" y="-14" class="lbl r-sm">Mars</text>
+        <text x="218" y="-34" class="lbl-mono r-sm">22 Jun 2029</text>
+        <text x="0" y="-18" class="lbl-mono" text-anchor="middle">Sun</text>
+      </svg>
+      <div class="hud">
+        <span>r <b class="num">1.12 AU</b> · v <b class="num">29.09 km/s</b></span>
+        <span class="wide">to Mars <b class="num">99 d</b> · Δv left <b class="num">3.86 km/s</b></span>
+      </div>
+      <div class="clock"><div class="overline">Mission clock</div><div class="t">T+ 99 d 04:12</div></div>
+      <div class="series-key">
+        <span><svg viewBox="0 0 24 4"><line x1="0" y1="2" x2="24" y2="2" stroke="var(--series-chemical)" stroke-width="2"/></svg>Chemical · flown</span>
+        <span><svg viewBox="0 0 24 4"><line x1="0" y1="2" x2="24" y2="2" stroke="var(--series-chemical)" stroke-width="2" stroke-dasharray="6 5" opacity=".5"/></svg>Remaining</span>
+      </div>
+      <div class="scalebar"><i style="width:56px"></i>1 AU</div>
+      <div class="ctrls">
+        <div class="seg" role="radiogroup" aria-label="View"><button role="radio" aria-checked="true">2D</button><button role="radio" aria-checked="false">3D</button></div>
+        <button class="btn ghost icon sm" aria-label="Reset view" style="background:rgb(17 21 26 / .9)"><svg class="i"><use href="#i-reset"/></svg></button>
+      </div>
+    </div>
+    <div class="timeline">
+      <div class="tl-row">
+        <button class="btn ghost icon sm" aria-label="Previous phase"><svg class="i"><use href="#i-back"/></svg></button>
+        <button class="btn secondary sm" aria-label="Pause"><svg class="i"><use href="#i-pause"/></svg>Pause</button>
+        <button class="btn ghost icon sm" aria-label="Next phase"><svg class="i"><use href="#i-fwd"/></svg></button>
+        <button class="btn ghost sm speed">1×<svg class="i"><use href="#i-chev"/></svg></button>
+        <span class="spacer"></span>
+        <span class="mono num">Day 99 <span class="unit">/ 198</span></span>
+      </div>
+      <div class="scrub"><div class="track"></div><div class="done"></div><div class="mk" style="left:0"></div><div class="mk" style="left:calc(100% - 2px)"></div><div class="head"></div></div>
+      <div class="phases">
+        <div class="chip"><span class="p">LEO assembly</span><span class="d">4 launches</span></div>
+        <div class="chip"><span class="p">TMI burn</span><span class="d">Day 0 · 3.48 km/s</span></div>
+        <div class="chip active"><span class="p">Cruise</span><span class="d">Day 0–198</span></div>
+        <div class="chip"><span class="p">Mars capture</span><span class="d">Day 198 · 3.34 km/s</span></div>
+        <div class="chip"><span class="p">EDL</span><span class="d">Day 198</span></div>
+      </div>
+    </div>
+    <div class="charts">
+      <div class="chart">
+        <div class="chart-h"><span class="t">Velocity (km/s)</span><a class="tbl-toggle" href="#">Show data table</a></div>
+        <svg viewBox="0 0 620 156" role="img" aria-label="Heliocentric velocity falls from 32.27 km/s at departure to 23.47 km/s at Mars arrival, day 198">
+          <line class="gl" x1="40" x2="608" y1="22" y2="22"/><text x="34" y="26" text-anchor="end">32</text><line class="gl" x1="40" x2="608" y1="66" y2="66"/><text x="34" y="70" text-anchor="end">28</text><line class="gl" x1="40" x2="608" y1="110" y2="110"/><text x="34" y="114" text-anchor="end">24</text>
+          <line class="base" x1="40" x2="608" y1="128" y2="128"/>
+          <line class="phase-line" x1="40" x2="40" y1="14" y2="128"/><line class="phase-line" x1="608" x2="608" y1="14" y2="128"/>
+          <text x="44" y="10">TMI</text><text x="604" y="10" text-anchor="end">MOI · day 198</text>
+          <text x="40" y="148" text-anchor="middle">0</text><text x="112" y="148" text-anchor="middle" class="xt-odd">25</text><text x="183" y="148" text-anchor="middle">50</text><text x="255" y="148" text-anchor="middle" class="xt-odd">75</text><text x="327" y="148" text-anchor="middle">100</text><text x="399" y="148" text-anchor="middle" class="xt-odd">125</text><text x="470" y="148" text-anchor="middle">150</text><text x="542" y="148" text-anchor="middle" class="xt-odd">175</text><text x="608" y="148" text-anchor="middle">198</text>
+          <path d="M40 19 C 183 28, 269 48, 324 54 S 528 100, 608 116" fill="none" stroke="var(--series-chemical)" stroke-width="2"/>
+          <line x1="324" x2="324" y1="14" y2="128" stroke="var(--data)"/>
+          <circle cx="324" cy="54" r="3" fill="var(--data)"/>
+          <text x="332" y="46" text-anchor="start" style="fill:var(--text-1)">29.09 km/s</text>
+        </svg>
+      </div>
+      <div class="chart">
+        <div class="chart-h"><span class="t">Distance from Sun (AU)</span><a class="tbl-toggle" href="#">Show data table</a></div>
+        <svg viewBox="0 0 620 156" role="img" aria-label="Distance from the Sun rises from 1.00 AU to 1.38 AU over 198 days">
+          <line class="gl" x1="40" x2="608" y1="22" y2="22"/><text x="34" y="26" text-anchor="end">1.4</text><line class="gl" x1="40" x2="608" y1="72" y2="72"/><text x="34" y="76" text-anchor="end">1.2</text><line class="gl" x1="40" x2="608" y1="122" y2="122"/><text x="34" y="126" text-anchor="end">1.0</text>
+          <line class="base" x1="40" x2="608" y1="128" y2="128"/>
+          <line class="phase-line" x1="40" x2="40" y1="14" y2="128"/><line class="phase-line" x1="608" x2="608" y1="14" y2="128"/>
+          <text x="44" y="10">TMI</text><text x="604" y="10" text-anchor="end">MOI · day 198</text>
+          <text x="40" y="148" text-anchor="middle">0</text><text x="112" y="148" text-anchor="middle" class="xt-odd">25</text><text x="183" y="148" text-anchor="middle">50</text><text x="255" y="148" text-anchor="middle" class="xt-odd">75</text><text x="327" y="148" text-anchor="middle">100</text><text x="399" y="148" text-anchor="middle" class="xt-odd">125</text><text x="470" y="148" text-anchor="middle">150</text><text x="542" y="148" text-anchor="middle" class="xt-odd">175</text><text x="608" y="148" text-anchor="middle">198</text>
+          <path d="M40 122 C 183 119, 269 97, 324 92 S 528 43, 608 27" fill="none" stroke="var(--series-chemical)" stroke-width="2"/>
+          <line x1="324" x2="324" y1="14" y2="128" stroke="var(--data)"/>
+          <circle cx="324" cy="92" r="3" fill="var(--data)"/>
+          <text x="316" y="82" text-anchor="end" style="fill:var(--text-1)">1.12 AU</text>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <!-- RESULTS -->
+  <aside class="panel results" aria-label="Results">
+    <div class="panel-h"><span class="overline">Results</span><a class="caption" href="#">Sources</a></div>
+    <div class="res-head">
+      <div class="plan"><span class="bar"></span><span class="overline" style="color:var(--text-2)">Plan A · Chemical on SLS Block 1</span></div>
+      <h3>4 crew to Mars in 198 days</h3>
+      <p class="outcome"><svg class="i"><use href="#i-check-circle"/></svg>Mission feasible <span class="muted">· 93.2 % success</span> <span class="est">est.</span></p>
+    </div>
+    <div class="tiles">
+      <div class="tile"><div class="top"><span class="overline">Transit</span></div><div class="v">198<span class="unit">d</span></div><div class="d">Arrives 22 Jun 2029</div></div>
+      <div class="tile"><div class="top"><span class="overline">Δv required</span></div><div class="v">6.82<span class="unit">km/s</span></div><div class="d">Spare 0.52 km/s</div></div>
+      <div class="tile"><div class="top"><span class="overline">Mass in LEO</span></div><div class="v">336<span class="unit">t</span></div><div class="d">4 launches<span class="cite">[1]</span></div></div>
+      <div class="tile"><div class="top"><span class="overline">Cost</span><span class="est">est.</span></div><div class="v">$9.9<span class="unit">B</span></div><div class="d">$2.2 B per launch<span class="cite">[3]</span></div></div>
+      <div class="tile"><div class="top"><span class="overline">Mission dose</span></div><div class="v">1 154<span class="unit">mSv</span></div><div class="d warn"><svg class="i"><use href="#i-alert"/></svg>192 % of career limit</div></div>
+      <div class="tile"><div class="top"><span class="overline">Transit dose</span></div><div class="v">365<span class="unit">mSv</span></div><div class="d">GCR, cruise only<span class="cite">[4]</span></div></div>
+    </div>
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected="true">Overview</button><button role="tab" aria-selected="false">Δv</button><button role="tab" aria-selected="false">Mass</button><button role="tab" aria-selected="false">Radiation</button><button role="tab" aria-selected="false">Show the math</button>
+    </div>
+    <div class="budget">
+      <div class="bh"><span>Δv budget</span><span class="mono num">7.34 <span class="unit">km/s</span></span></div>
+      <div class="stack"><i style="width:47.4%;background:var(--series-chemical)"></i><i style="width:45.5%;background:var(--series-chemical);opacity:.55"></i><i style="width:7.1%;background:var(--border-strong)"></i></div>
+      <div class="brow"><span class="sw" style="background:var(--series-chemical)"></span><span>Trans-Mars injection</span><span class="num">3.48 km/s</span></div>
+      <div class="brow"><span class="sw" style="background:var(--series-chemical);opacity:.55"></span><span>Mars orbit insertion</span><span class="num">3.34 km/s</span></div>
+      <div class="brow"><span class="sw" style="background:var(--border-strong)"></span><span>Spare after reserve</span><span class="num">0.52 km/s</span></div>
+    </div>
+    <div class="budget" style="border-top:1px solid var(--border-subtle)">
+      <div class="bh"><span>When each stage is the better choice</span></div>
+      <div class="brow"><span class="sw" style="background:var(--series-nuclear)"></span><span>Shortest transit and lowest dose</span><span class="num">160 d</span></div>
+      <div class="brow"><span class="sw" style="background:var(--series-starship)"></span><span>Lowest cost, most spare Δv</span><span class="num">$0.8 B</span></div>
+      <div class="brow"><span class="sw" style="background:var(--series-chemical)"></span><span>Highest success, flight-proven</span><span class="num">93.2 %</span></div>
+    </div>
+    <div class="note"><svg class="i"><use href="#i-info"/></svg><span>Mission dose exceeds the career limit for every stage in this window. A faster transfer cuts cruise dose but lengthens the stay at Mars.</span></div>
+  </aside>
+</div>
+
+<section class="compare" aria-labelledby="cmp-h">
+  <div class="compare-h">
+    <div><h2 id="cmp-h">Same mission, three stages</h2><p>2029 window · 4 crew · fastest transfer each stage can fly · risk 5</p></div>
+    <a class="btn ghost sm" href="#">All sources<svg class="i"><use href="#i-ext"/></svg></a>
+  </div>
+  <p class="swipe">Swipe the table to see all three stages.</p>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr>
+        <th>Metric</th>
+        <th><span class="ser"><svg viewBox="0 0 20 4"><line x1="0" y1="2" x2="20" y2="2" stroke="var(--series-chemical)" stroke-width="2"/></svg>Chemical</span><span class="sub">SLS Block 1 · Isp 460 s</span></th>
+        <th><span class="ser"><svg viewBox="0 0 20 4"><line x1="0" y1="2" x2="20" y2="2" stroke="var(--series-nuclear)" stroke-width="2" stroke-dasharray="6 4"/></svg>Nuclear thermal</span><span class="sub">Concept · never flown</span></th>
+        <th><span class="ser"><svg viewBox="0 0 20 4"><line x1="0" y1="2" x2="20" y2="2" stroke="var(--series-starship)" stroke-width="2" stroke-dasharray="2 3"/></svg>Starship</span><span class="sub">Refuelled in LEO</span></th>
+      </tr></thead>
+      <tbody>
+        <tr><td>Transit (d)</td><td>198</td><td>160</td><td>206</td></tr>
+        <tr><td>Δv required (km/s)</td><td>6.82</td><td>9.48</td><td>3.62</td></tr>
+        <tr><td>Spare Δv (km/s)</td><td>0.52</td><td>0.72</td><td>4.43</td></tr>
+        <tr><td>Mass in LEO (t)</td><td>336</td><td>336</td><td>445</td></tr>
+        <tr><td>Launches</td><td>4</td><td>4</td><td>4</td></tr>
+        <tr><td>Transit dose (mSv)</td><td>365</td><td>294</td><td>379</td></tr>
+        <tr><td>Mission dose (mSv)<span class="cite">[4]</span></td><td>1 154</td><td>998</td><td>1 159</td></tr>
+        <tr><td>Cost ($ B)<span class="cite">[3]</span> <span class="est">est.</span></td><td>9.9</td><td>11.9</td><td>0.8</td></tr>
+        <tr><td>Success (%) <span class="est">est.</span></td><td>93.2</td><td>85.8</td><td>87.2</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="sources">
+    <span><b>[1]</b>NASA SLS reference guide: 95 t to LEO, Block 1</span>
+    <span><b>[2]</b>Aerojet Rocketdyne RL10 data sheet: Isp ≈ 460 s</span>
+    <span><b>[3]</b>NASA OIG IG-22-003: ≈ $2.2 B per SLS launch</span>
+    <span><b>[4]</b>Zeitlin et al., Science 2013: Curiosity RAD cruise dose</span>
+    <span><b>[5]</b>NASA-STD-3001: 600 mSv career limit</span>
+  </div>
+</section>
+</main>
+<footer class="foot"><span>Educational model: patched conics, impulsive burns, coplanar orbits. Costs and success figures are estimates.</span><span class="mono">Seed 42 · engine v8.0</span></footer>
+<div class="bottom-bar"><div class="sum"><b>Chemical · 198 d</b>2029 window · 4 crew · SLS Block 1</div><button class="btn primary" style="height:44px"><svg class="i lg"><use href="#i-play"/></svg>Fly mission</button></div>
+
+<script>
+// deterministic star field (decorative)
+document.querySelectorAll('g.stars').forEach(g=>{
+  let s=7; const r=()=>(s=(s*16807)%2147483647)/2147483647;
+  const n=+g.dataset.n,w=+g.dataset.w,h=+g.dataset.h; let out='';
+  for(let i=0;i<n;i++){out+=`<circle class="star" cx="${(r()*w-w/2).toFixed(1)}" cy="${(r()*h-h/2).toFixed(1)}" r="${(0.4+r()*0.7).toFixed(2)}" opacity="${(0.2+r()*0.2).toFixed(2)}"/>`}
+  g.innerHTML=out;
+});
+</script>
+</body>
+</html>
