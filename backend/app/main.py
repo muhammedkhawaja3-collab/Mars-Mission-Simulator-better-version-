@@ -55,7 +55,7 @@ def create_app(cors_origins: Sequence[str] | None = None) -> FastAPI:
         version=APP_VERSION,
         description=(
             "Python mirror of the JS physics engine. `POST /api/mission` returns the same "
-            "JSON as the browser engine's `simulateMission` (schemaVersion 2)."
+            "JSON as the browser engine's `simulateMission` (schemaVersion 3)."
         ),
         openapi_url="/api/openapi.json",
         # Swagger UI loads its assets from a CDN, which the production CSP blocks.

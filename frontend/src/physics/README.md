@@ -30,7 +30,7 @@ const result = simulateMission({
 | `ephemeris.js` | Planet positions from mean elements (Kepler's equation), launch-window phasing, conjunction-class surface stay. |
 | `windows.js` | Fixed launch-window table (`2026-11`, `2028-12`, `2031-01`, `2033-03`, `2035-07`) computed by the ephemeris, with opposition dates. A test checks table = computation. |
 | `rocket.js` | Tsiolkovsky equation, propellant for a Δv, max Δv, launch counting. |
-| `launchVehicles.js` | Launch-vehicle catalog (payload to LEO, Isp, thrust, cost, status, source) and stage × launcher compatibility. |
+| `launchVehicles.js` | Launch-vehicle catalog (payload to LEO, Isp, thrust, cost, status, reliability class, source) and stage × launcher compatibility. |
 | `vehicles.js` | The three in-space stages plus `createCustomVehicle()`. Estimates are flagged `ESTIMATE`. |
 | `lifeSupport.js` | Food, water and O₂ per crew-day from NASA BVAD, per mission phase, open-loop and closed-loop. |
 | `rng.js` | `mulberry32(seed)` and helpers; bit-exact portable. |
@@ -38,7 +38,7 @@ const result = simulateMission({
 | `success.js` | Success heuristic with an explained `successFactors` list; uncrewed launch failures are recoverable. |
 | `scoring.js` | Score 0–1000, letter grade, transparent components, achievements (gameplay layer). |
 | `mission.js` | `simulateMission()`, crew payload, Δv margin, crew-health index. |
-| `tradeoffs.js` | Picks the best vehicle per metric. Used to generate neutral UI copy with no built-in winner. |
+| `tradeoffs.js` | Picks the best vehicle per metric (neutral UI copy, no built-in winner); `comparisonFraming()` notes; `cheapestCompatibleLauncher()` re-flies a stage on its cheapest launcher. |
 | `units.js` | Display conversions. |
 
 ## The model
@@ -85,11 +85,24 @@ const result = simulateMission({
      cost (below). Development costs are excluded.
 7. **Radiation.** Dose = measured rate × time, reported per phase:
    `dose.outbound`, `dose.surface`, `dose.return`, `dose.events` (seeded
-   solar particle events), `dose.total` and `dose.careerFraction` of the
-   600 mSv NASA career limit. Cruise uses 1.84 mSv/day (Curiosity RAD, GCR
+   solar particle events), `dose.total`, `dose.careerFraction` of the
+   600 mSv NASA career limit, `dose.careerLimit` (0.6 Sv) and
+   `dose.exceedsCareerLimit`. Cruise uses 1.84 mSv/day (Curiosity RAD, GCR
    only), the surface 0.64 mSv/day. The return leg mirrors the outbound one,
    and the surface stay is the wait the planets' phasing requires (≈ 454 d for
-   Hohmann).
+   Hohmann). **Every conjunction-class mission with MSL-like shielding
+   exceeds the 600 mSv limit** (≈ 0.84–1.26 Sv for the reference vehicles);
+   the result says so in `framing` (`career-limit`). Cross-check: Hassler et
+   al. (2014) estimated ≈ 1.01 Sv for 180 d + 500 d + 180 d; this model gives
+   ≈ 0.98 Sv for those durations.
+9. **Framing.** `framing` is a list of `{id, text}` notes the UI shows next
+   to the numbers: `launcher-cost` (costs are shown with the chosen
+   launcher, which changes them), `capture-method` (engine-burn capture vs
+   aerocapture is an architecture choice; DRA 5.0 also studied aerocapture
+   for the chemical option) and, when exceeded, `career-limit`.
+   `comparisonFraming(missions)` adds comparison-level notes, and
+   `cheapestCompatibleLauncher(params)` flies a stage on every compatible
+   launcher and returns the lowest-cost feasible result.
 8. **Life support.** Per crew-day: O₂ 0.895 kg, water 3.2 kg in transit and
    4.48 kg on the surface, food 2.39 kg (packaged). Closed-loop mass = food +
    water × (1 − 0.93) + O₂ × (1 − 0.50). Outputs both open-loop and
@@ -103,14 +116,17 @@ const result = simulateMission({
 
 - **Success probability** (`success.js`): product of mission-critical factors
   only, each returned in `successFactors` as `{id, label, probability, explanation}`:
-  crewed launch (0.99), dockings/transfers involving the crewed vehicle
+  crewed launch (by the launcher's reliability class: proven 0.99 for
+  Falcon Heavy, limited history 0.97 for SLS Block 1 and New Glenn,
+  planned/never flown 0.96 for SLS Block 2, flight test 0.95 for Starship;
+  the explanation names the class and why), dockings/transfers involving the crewed vehicle
   (assembled: 1 docking if N > 1; Starship: each of the N − 1 tanker transfers
   docks with the crewed ship), propulsive burns (vehicle `burnReliability`
   per burn), aerocapture (Starship only), Mars EDL (0.98, same for all), and a
   Δv-margin term 1 − 0.10·e^(−margin/0.04).
   **A failed uncrewed launch is recoverable**: the element is re-flown. With
-  per-element success q (launch × docking for assembled elements, launch only
-  for tankers) and U uncrewed launches, expected extra launches =
+  per-element success q (launcher reliability × docking for assembled
+  elements, launcher reliability only for tankers) and U uncrewed launches, expected extra launches =
   U(1 − q)/q (negative binomial). That adds `cost.reflightReserve` = extra ×
   cost per launch and `launchPlan.reflightDelayDays` = extra × 30 days
   (ASSUMPTION), not mission loss. The schedule penalty is reported but does
@@ -126,17 +142,20 @@ const result = simulateMission({
   (solar-conjunction moratoria last ≈ 2 weeks). Event odds are illustrative.
   The physics (trajectory, propellant) never depends on the seed.
 - **Score** (`scoring.js`, gameplay): 300 × success probability (0 if aborted)
-  + 200 × (1 − dose/600 mSv) + 150 × (Hohmann propellant / propellant used) +
+  + 200 × radiation (≤ 0.8 Sv full, ≥ 1.4 Sv zero, linear; the old
+  "fraction of 600 mSv" scale scored every mission 0 because every
+  conjunction-class mission exceeds the limit) + 150 × (Hohmann propellant / propellant used) +
   150 × log-scaled cost ($1 B → full, $30 B → 0) + 200 × transit
   (≤ 120 d full, ≥ 330 d zero). Grades: A+ ≥ 900, A ≥ 800, B ≥ 650, C ≥ 500,
   D ≥ 350, else F. Achievements: Fuel Miser, Perfect Window (cheapest fixed
-  window, currently `2033-03`), Radiation Rookie, Shielded, Heavy Lifter,
-  Speed Demon, Full Crew, Risk Taker Survives.
+  window, currently `2033-03`), Radiation Rookie (mission dose < 0.9 Sv),
+  Shielded, Heavy Lifter, Speed Demon, Full Crew, Risk Taker Survives. A test
+  pins one input that earns each achievement, so none can become unreachable.
 - **Crew-health index** = 100 − 25 × (mission dose / 600 mSv) − 1 per month
   weightless. Illustrative only. The UI does not show a bone-loss percentage
   (Phase 1's unsourced per-month figure was removed).
 
-## Output shape (`simulateMission`, schemaVersion 2)
+## Output shape (`simulateMission`, schemaVersion 3)
 
 Feasible result keys:
 
@@ -145,7 +164,7 @@ schemaVersion, inputs{vehicleId, launchVehicleId, crewSize, riskTolerance, windo
   transferChoice, habitatMass, closure{water, oxygen}},
 vehicleId, launchVehicleId, windowId,
 vehicle{id, name, isp, stageDryMass, propellantCapacity, marsCapture, gcrShieldingFactor, launchMode, trl, hardwareCost},
-launchVehicle{id, name, payloadLeoKg, costPerLaunchUsd, status},
+launchVehicle{id, name, payloadLeoKg, costPerLaunchUsd, status, reliabilityClass, launchReliability},
 feasible, infeasibleReason, transferChoice, departureDate, arrivalDate (ISO strings),
 transitTime, hohmannTransitTime, transferAngle, pathLength, averageSpeed, vInfDeparture, vInfArrival,
 deltaV{departure, capture, total, planned, capability, reserve, margin, hohmannTotal},
@@ -154,7 +173,7 @@ launches, launchPlan{launchVehicleId, capacityPerLaunch, crewedLaunches, uncrewe
   expectedReflights, expectedLaunches, reflightDelayDays},
 cost{hardware, launches, reflightReserve, total},
 duration{outbound, surfaceStay, return, total},
-dose{outbound, surface, return, events, total, careerFraction},
+dose{outbound, surface, return, events, total, careerFraction, careerLimit, exceedsCareerLimit},
 lifeSupport{crewSize, closure, contingencyDays, ratesPerCrewDay{transit, surface},
   outbound, surface, return (each {days, crewDays, food, water, oxygen, openLoop, closedLoop}),
   total{food, water, oxygen, openLoop, closedLoop}},
@@ -166,6 +185,7 @@ events[{id, type, label, phase, burn, day, model, effects{extraDose, deltaVPenal
   consumablesLossKg, commsOutageDays}, description}],
 eventSummary{count, byType, extraDose, deltaVPenalty, consumablesLossKg, commsOutageDays,
   deltaVReserveAfter, abort, abortReason},
+framing[{id, text}]   (ids: launcher-cost, capture-method, career-limit),
 score{total, max, grade, components[{id, label, max, value, points, explanation}],
   achievements[{id, label, description}]}
 ```
@@ -218,6 +238,9 @@ input throws `TypeError`/`RangeError`.
 
 ## Sources
 
+Every constant, vehicle figure, rate, limit, date, cost and heuristic is
+listed with its primary source and status in [`docs/FACT_CHECK.md`](../../../docs/FACT_CHECK.md).
+
 | Quantity | Value | Source |
 |---|---|---|
 | AU, μ_sun | 1.495978707e11 m, 1.32712440018e20 m³/s² | IAU 2012 B2; IAU 2015 B3 / JPL DE430 |
@@ -228,16 +251,16 @@ input throws `TypeError`/`RangeError`.
 | Cruise dose rate (GCR) | 1.84 mSv/day | Zeitlin et al., Science 340, 1080 (2013) |
 | Surface dose rate | 0.64 mSv/day | Hassler et al., Science 343 (2014) |
 | SPE dose per event | 1.2–19.5 mSv | RAD cruise SPEs, Hassler, NOAA Space Weather Workshop 2016 |
-| Career limit | 600 mSv | NASA-STD-3001 Vol. 1 (2022+) |
+| Career limit | 600 mSv | NASA-STD-3001 Vol. 1 (2022+); every conjunction-class mission exceeds it |
 | Chemical Isp | 460 s | Aerojet Rocketdyne RL10 (B-2: 465.5 s; C-3 ≈ 460 s) |
-| NTR Isp | 900 s (≈ 850 s demonstrated) | DRA 5.0 design value; Rover/NERVA ground tests |
-| Starship ship Isp, tanks | 380 s, 1,200 t | SpaceX Starship published figures |
-| Starship launcher | 100–150 t LEO (100 t used), 7,590 tf | SpaceX Starship page |
+| NTR Isp | 900 s (875 s best ground test, Pewee 1, 1968) | DRA 5.0 design value; National Academies (2021) Table 2.1 |
+| Starship ship Isp, tanks | 380 s, 1,200 t | ESTIMATE: commonly reported (secondary sources); SpaceX publishes no Raptor Isp, and its page lists 1,500–1,600 t for upgraded ships |
+| Starship launcher | 100–150 t LEO (100 t used), 7,590 tf | SpaceX Starship page (later revisions: 8,240 tf); Starship Users Guide Rev 1.0 (2020) |
 | SLS Block 1 | 95 t LEO, 8.8 Mlbf, ≈ $2.2 B | NASA SLS reference; NASA OIG IG-22-003 |
 | SLS Block 2 (planned) | 130 t LEO, 9.5 Mlbf | NASA SLS fact sheets (2015, 2023); JANNAF 2024 |
 | RS-25 Isp | 366 s SL / 452 s vac | Aerojet Rocketdyne / L3Harris RS-25 spec sheet |
 | Falcon Heavy (expendable) | 63.8 t LEO, 22,819 kN | SpaceX Falcon Heavy page |
-| New Glenn | 45 t LEO, 7 × 2,450 kN BE-4 | Blue Origin New Glenn and BE-4 pages |
+| New Glenn | 45 t LEO, 7 × 2,450 kN BE-4 | Blue Origin New Glenn and BE-4 pages (7×2 baseline; Nov 2025 BE-4 upgrade to 4.5 Mlbf and 9×4 variant not modelled) |
 | O₂ | 0.895 kg/crew-day | NASA BVAD Rev2 (NASA/TP-2015-218570/REV2), Table 3-31 |
 | Water | 3.2 (transit) / 4.48 (surface) kg/crew-day | NASA BVAD Rev2, Table 4-20 |
 | Food | 2.39 kg/crew-day incl. packaging | NASA BVAD Rev2 text under Table 3-31 (Table 4-47, Ewert et al. 2019) |
@@ -253,11 +276,12 @@ input throws `TypeError`/`RangeError`.
 | Starship dry mass | 120 t | Unpublished. Public estimates span 100–150 t. |
 | Starship entry-speed limit | 7.5 km/s | Caps Starship's fastest transit |
 | Starship / Falcon Heavy (expendable) / New Glenn cost per launch | $150 M / $150 M / $110 M | No published prices for these configurations |
-| SLS Block 2 cost per launch | $2.5 B | OIG's initial Block 1B estimate used as a floor |
+| SLS Block 2 cost per launch | $2.5 B | NASA OIG IG-24-001 (Oct 2023): Block 1B "at least $2.5 billion" to produce, used as a floor |
 | Raptor Isp (327 / 350 s), Merlin 1D Isp (282 / 311 s) | display only | Not published by SpaceX; commonly cited figures. BE-4 Isp is unpublished and shown as null. |
 | Hardware costs | $1.0 B / $3.0 B / $0.2 B | Development excluded. NTR development would add several $B. |
 | Habitat mass | 15 t + 4.5 t per crew | Same for all vehicles, scaled from the DRA 5.0 transit habitat |
 | Recycling closure | water 93 %, O₂ 50 % | ASSUMPTION; adjustable via `closure` |
-| Reliability figures | 0.95–0.995 per event, launches 0.99, EDL 0.98 | Heuristic only |
+| Reliability figures | 0.95–0.995 per event; launches 0.95–0.99 by launcher class; EDL 0.98 | Heuristic only |
+| Radiation score scale | full at 0.8 Sv, zero at 1.4 Sv | Design choice spanning the doses conjunction-class missions reach |
 | Re-flight delay | 30 days per re-flight | ASSUMPTION |
 | Event odds | see `events.js` | Gameplay model |

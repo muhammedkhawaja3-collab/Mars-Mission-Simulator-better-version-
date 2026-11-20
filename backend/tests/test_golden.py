@@ -73,7 +73,7 @@ def assert_matches(actual, expected, path: str = "$") -> None:
 
 
 def test_schema_version_matches_js() -> None:
-    assert GOLDEN["schemaVersion"] == MISSION_SCHEMA_VERSION == 2
+    assert GOLDEN["schemaVersion"] == MISSION_SCHEMA_VERSION == 3
 
 
 def test_fixture_covers_23_cases() -> None:

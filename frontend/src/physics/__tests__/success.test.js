@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { successEstimate, LAUNCH_RELIABILITY, REFLIGHT_DELAY_DAYS } from '../success.js';
 import { VEHICLES } from '../vehicles.js';
-import { LAUNCH_VEHICLES } from '../launchVehicles.js';
+import { LAUNCH_VEHICLES, LAUNCH_VEHICLE_IDS, LAUNCH_RELIABILITY_BY_CLASS } from '../launchVehicles.js';
 import { simulateMission } from '../mission.js';
 
 const SLS = LAUNCH_VEHICLES['sls-block1'];
@@ -23,7 +23,7 @@ describe('success heuristic (Decision 2: uncrewed launch failures are recoverabl
 
   it('a crewed launch failure ends the mission: the crewed launch is always a factor', () => {
     const s = successEstimate({ vehicle: VEHICLES.chemical, launchVehicle: SLS, launches: 1, margin: 0.07 });
-    expect(s.factors.find((f) => f.id === 'crewed-launch').probability).toBe(LAUNCH_RELIABILITY);
+    expect(s.factors.find((f) => f.id === 'crewed-launch').probability).toBe(SLS.launchReliability);
   });
 
   it('a tanker launch failure does not: more tankers add expected re-flights and cost, not launch-loss risk', () => {
@@ -32,7 +32,7 @@ describe('success heuristic (Decision 2: uncrewed launch failures are recoverabl
     const launchFactor = (s) => s.factors.find((f) => f.id === 'crewed-launch').probability;
     expect(launchFactor(many)).toBe(launchFactor(few));
     // Expected extra launches = U(1 − p)/p for U uncrewed tankers.
-    expect(many.recoverable.expectedReflights).toBeCloseTo((12 * (1 - LAUNCH_RELIABILITY)) / LAUNCH_RELIABILITY, 12);
+    expect(many.recoverable.expectedReflights).toBeCloseTo((12 * (1 - SHIP.launchReliability)) / SHIP.launchReliability, 12);
     expect(many.recoverable.costPenaltyUsd).toBeCloseTo(many.recoverable.expectedReflights * SHIP.costPerLaunchUsd, 3);
     expect(many.recoverable.delayDays).toBeCloseTo(many.recoverable.expectedReflights * REFLIGHT_DELAY_DAYS, 9);
     // Propellant transfers dock with the crewed ship, so they stay mission-critical.
@@ -43,7 +43,7 @@ describe('success heuristic (Decision 2: uncrewed launch failures are recoverabl
   it('assembled stacks: one crew docking whatever N is; uncrewed elements re-fly on launch or docking failure', () => {
     const s = successEstimate({ vehicle: VEHICLES.chemical, launchVehicle: SLS, launches: 5, margin: 0.07 });
     expect(s.factors.find((f) => f.id === 'crew-dockings').probability).toBe(VEHICLES.chemical.operationReliability);
-    const q = LAUNCH_RELIABILITY * VEHICLES.chemical.operationReliability;
+    const q = SLS.launchReliability * VEHICLES.chemical.operationReliability;
     expect(s.recoverable.expectedReflights).toBeCloseTo((4 * (1 - q)) / q, 12);
   });
 
@@ -52,6 +52,32 @@ describe('success heuristic (Decision 2: uncrewed launch failures are recoverabl
     const ship = successEstimate({ vehicle: VEHICLES.starship, launchVehicle: SHIP, launches: 2, margin: 0.07 });
     expect(chem.factors.find((f) => f.id === 'aerocapture').probability).toBe(1);
     expect(ship.factors.find((f) => f.id === 'aerocapture').probability).toBe(VEHICLES.starship.aerocaptureReliability);
+  });
+
+  it('launch reliability follows the launcher reliability class (heuristic) and is explained', () => {
+    const p = (id) => LAUNCH_VEHICLES[id].launchReliability;
+    expect(p('falcon-heavy')).toBe(LAUNCH_RELIABILITY_BY_CLASS.proven);
+    expect(p('sls-block1')).toBe(LAUNCH_RELIABILITY_BY_CLASS.limited);
+    expect(p('new-glenn')).toBe(LAUNCH_RELIABILITY_BY_CLASS.limited);
+    expect(p('sls-block2')).toBe(LAUNCH_RELIABILITY_BY_CLASS.planned);
+    expect(p('starship')).toBe(LAUNCH_RELIABILITY_BY_CLASS['flight-test']);
+    expect(p('falcon-heavy')).toBeGreaterThan(p('sls-block1'));
+    expect(p('sls-block1')).toBeGreaterThan(p('sls-block2'));
+    expect(p('sls-block2')).toBeGreaterThan(p('starship'));
+    for (const id of LAUNCH_VEHICLE_IDS) {
+      const lv = LAUNCH_VEHICLES[id];
+      expect(lv.launchReliability).toBe(LAUNCH_RELIABILITY_BY_CLASS[lv.reliabilityClass]);
+      const s = successEstimate({ vehicle: VEHICLES.chemical, launchVehicle: lv, launches: 3, margin: 0.07 });
+      const f = s.factors.find((x) => x.id === 'crewed-launch');
+      expect(f.probability).toBe(lv.launchReliability);
+      expect(f.explanation).toContain(lv.reliabilityClass);
+      expect(f.explanation).toContain(lv.reliabilityBasis);
+      expect(s.recoverable.elementReliability).toBeCloseTo(lv.launchReliability * VEHICLES.chemical.operationReliability, 15);
+    }
+    // A launcher without a class falls back to the proven value.
+    const bare = { id: 'x', name: 'X', costPerLaunchUsd: 1e8 };
+    expect(successEstimate({ vehicle: VEHICLES.chemical, launchVehicle: bare, launches: 1, margin: 0.07 })
+      .factors[0].probability).toBe(LAUNCH_RELIABILITY);
   });
 
   it('simulateMission exposes successFactors and adds the re-flight reserve to the cost', () => {

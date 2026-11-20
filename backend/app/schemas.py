@@ -5,7 +5,7 @@ from strings/bools/floats, and NaN/Infinity are refused. Each request field
 accepts its snake_case name (used by the existing frontend client) or the
 camelCase name used by the JS engine, but not both at once.
 
-Response models mirror the JS ``simulateMission`` output (schemaVersion 2),
+Response models mirror the JS ``simulateMission`` output (schemaVersion 3),
 with camelCase field names so the JSON is identical to what the JS engine
 returns. They are documented in ``frontend/src/physics/README.md``.
 """
@@ -167,7 +167,7 @@ class ErrorResponse(BaseModel):
     error: ErrorBody
 
 
-# ── Mission result (mirror of the JS output, schemaVersion 2) ──────────────
+# ── Mission result (mirror of the JS output, schemaVersion 3) ──────────────
 
 Num = int | float
 
@@ -217,6 +217,8 @@ class LaunchVehicleSummary(_Out):
     payloadLeoKg: Num
     costPerLaunchUsd: Num
     status: Literal["operational", "flight-test", "planned"]
+    reliabilityClass: Literal["proven", "limited", "planned", "flight-test"]
+    launchReliability: Num
 
 
 class DeltaV(_Out):
@@ -274,6 +276,8 @@ class Dose(_Out):
     events: Num
     total: Num
     careerFraction: Num
+    careerLimit: Num
+    exceedsCareerLimit: bool
 
 
 class DailyRates(_Out):
@@ -362,6 +366,11 @@ class EventSummary(_Out):
     abortReason: str | None
 
 
+class FramingNote(_Out):
+    id: str
+    text: str
+
+
 class ScoreComponent(_Out):
     id: str
     label: str
@@ -388,7 +397,7 @@ class Score(_Out):
 class MissionResult(_Out):
     """Output of the mission model. Infeasible results carry only the first block of keys."""
 
-    schemaVersion: Literal[2]
+    schemaVersion: Literal[3]
     inputs: Inputs
     vehicleId: str
     launchVehicleId: str
@@ -422,6 +431,7 @@ class MissionResult(_Out):
     crewHealthIndex: Num | None = None
     events: list[MissionEvent]
     eventSummary: EventSummary | None = None
+    framing: list[FramingNote] | None = None
     score: Score
 
 
@@ -467,6 +477,9 @@ class LaunchVehicleOut(_Out):
     costPerLaunchUsd: Num
     reusable: bool
     status: str
+    reliabilityClass: str
+    launchReliability: Num
+    reliabilityBasis: str
     source: str
     notes: list[str]
 

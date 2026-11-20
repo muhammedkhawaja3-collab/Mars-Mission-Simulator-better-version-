@@ -24,6 +24,15 @@ including key order and the integer/float type of every value.
 | tradeoffs.js | tradeoffs.py |
 | — | jscompat.py (JS `%`, `Date`, `toFixed`, `JSON.stringify` semantics) |
 
+schemaVersion 3 (fact-check pass, see `docs/FACT_CHECK.md`) added
+`launchVehicle.reliabilityClass` / `launchReliability` (per-launcher
+heuristic launch reliability), `dose.careerLimit` / `dose.exceedsCareerLimit`
+and `framing[{id, text}]` to the mission result, and rescaled the radiation
+score to 0.8–1.4 Sv. `tradeoffs.py` also mirrors `comparison_framing()` and
+`cheapest_compatible_launcher()`. `tests/test_reality_check.py` mirrors the
+JS tests for these (every achievement earnable, radiation score live,
+reliability classes, framing).
+
 ## Run
 
 ```bash
@@ -48,7 +57,7 @@ runtime dependencies are in the root `requirements.txt`.
 | GET | `/api/health` | `{status: "ok", version, schemaVersion}` |
 | GET | `/api/vehicles` | `{stages[], launchVehicles[]}`: the catalogs, with sources |
 | GET | `/api/windows` | `{windows[], defaultWindowId, bestWindowId}` |
-| POST | `/api/mission` | The JS `simulateMission` result (schemaVersion 2) |
+| POST | `/api/mission` | The JS `simulateMission` result (schemaVersion 3) |
 
 ### `POST /api/mission` request
 

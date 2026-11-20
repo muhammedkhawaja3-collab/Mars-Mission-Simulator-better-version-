@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { scoreMission, gradeFor, ACHIEVEMENTS } from '../scoring.js';
+import { scoreMission, gradeFor, ACHIEVEMENTS, RADIATION_SCORE_FULL_SV, RADIATION_SCORE_ZERO_SV, RADIATION_ROOKIE_SV } from '../scoring.js';
+import { VEHICLE_IDS } from '../vehicles.js';
+import { WINDOW_IDS } from '../windows.js';
 import { simulateMission } from '../mission.js';
 import { BEST_WINDOW_ID } from '../windows.js';
 import { createCustomVehicle } from '../vehicles.js';
@@ -79,5 +81,96 @@ describe('achievements', () => {
     const slow = simulateMission({ vehicle: 'nuclear', windowId: '2031-01', transferChoice: { kind: 'hohmann' } });
     expect(ids(fast).includes('speed-demon')).toBe(fast.transitTime < 180 * DAY);
     expect(ids(slow)).not.toContain('speed-demon');
+  });
+});
+
+describe('radiation score is live (every conjunction-class mission exceeds 600 mSv)', () => {
+  const rad = (m) => m.score.components.find((c) => c.id === 'radiation');
+  const grid = [];
+  for (const windowId of WINDOW_IDS) {
+    for (const vehicle of VEHICLE_IDS) {
+      for (const kind of ['fastest', 'hohmann']) {
+        const m = simulateMission({ vehicle, windowId, transferChoice: { kind } });
+        if (m.feasible) grid.push(m);
+      }
+    }
+  }
+
+  it('every reference mission exceeds the career limit, and the result says so', () => {
+    expect(grid.length).toBeGreaterThan(20);
+    for (const m of grid) {
+      expect(m.dose.exceedsCareerLimit).toBe(true);
+      expect(m.dose.careerLimit).toBe(0.6);
+      expect(m.framing.map((f) => f.id)).toContain('career-limit');
+    }
+  });
+
+  it('awards non-zero, non-identical radiation points across the reference missions', () => {
+    const pts = grid.map((m) => rad(m).points);
+    expect(Math.max(...pts)).toBeGreaterThan(50);
+    expect(Math.min(...pts)).toBeLessThan(Math.max(...pts) - 50);
+    expect(pts.every((p) => p > 0)).toBe(true);
+  });
+
+  it('is linear between the full-marks and zero doses', () => {
+    const m = grid[0];
+    const at = (total) => scoreMission({ ...m, dose: { ...m.dose, total } }).components.find((c) => c.id === 'radiation').points;
+    expect(at(RADIATION_SCORE_FULL_SV)).toBeCloseTo(200, 9);
+    expect(at(0.3)).toBe(200);
+    expect(at(RADIATION_SCORE_ZERO_SV)).toBeCloseTo(0, 9);
+    expect(at(2)).toBe(0);
+    expect(at((RADIATION_SCORE_FULL_SV + RADIATION_SCORE_ZERO_SV) / 2)).toBeCloseTo(100, 9);
+    expect(rad(m).value).toBe(m.dose.total);
+  });
+
+  it('a heavily shielded custom build can get under the limit, and then no career-limit note appears', () => {
+    const v = createCustomVehicle({ name: 'bunker', isp: 900, stageDryMass: 60_000, propellantCapacity: 300_000, gcrShieldingFactor: 0.1 });
+    const m = simulateMission({ vehicle: v, windowId: '2035-07' });
+    expect(m.feasible).toBe(true);
+    expect(m.dose.exceedsCareerLimit).toBe(false);
+    expect(m.framing.map((f) => f.id)).not.toContain('career-limit');
+  });
+});
+
+describe('every achievement is earnable by some input combination', () => {
+  const shielded = createCustomVehicle({ name: 's', isp: 900, stageDryMass: 60_000, propellantCapacity: 200_000, gcrShieldingFactor: 0.6 });
+  // One witness input per achievement (kept explicit so a rebalance that
+  // makes an achievement unreachable fails here).
+  const WITNESSES = {
+    'fuel-miser': { vehicle: 'chemical', windowId: '2028-12', transferChoice: { kind: 'hohmann' } },
+    'perfect-window': { vehicle: 'chemical', windowId: BEST_WINDOW_ID },
+    'radiation-rookie': { vehicle: 'nuclear', windowId: '2035-07' },
+    shielded: { vehicle: shielded, windowId: '2031-01', transferChoice: { kind: 'hohmann' } },
+    'heavy-lifter': { vehicle: createCustomVehicle({ name: 'big', isp: 460, stageDryMass: 60_000, propellantCapacity: 600_000 }), windowId: '2028-12' },
+    'speed-demon': { vehicle: 'nuclear', windowId: '2033-03' },
+    'full-crew': { vehicle: 'chemical', crewSize: 8, windowId: '2028-12', transferChoice: { kind: 'hohmann' } },
+    'risk-taker': null, // found by a seed search below
+  };
+
+  it('has a witness for every achievement in the catalogue', () => {
+    expect(Object.keys(WITNESSES).sort()).toEqual(ACHIEVEMENTS.map((a) => a.id).sort());
+  });
+
+  for (const [id, input] of Object.entries(WITNESSES)) {
+    if (input === null) continue;
+    it(`${id} is earned by its witness input`, () => {
+      const m = simulateMission(input);
+      expect(m.feasible).toBe(true);
+      expect(m.score.achievements.map((a) => a.id)).toContain(id);
+    });
+  }
+
+  it('risk-taker is earned by some seed at risk 9', () => {
+    let found = null;
+    for (let seed = 1; seed <= 50 && !found; seed++) {
+      const m = simulateMission({ vehicle: 'chemical', windowId: '2028-12', riskTolerance: 9, seed });
+      if (m.score.achievements.some((a) => a.id === 'risk-taker')) found = seed;
+    }
+    expect(found).not.toBeNull();
+  });
+
+  it('Radiation Rookie threshold sits inside the reachable dose range', () => {
+    expect(RADIATION_ROOKIE_SV).toBeGreaterThan(RADIATION_SCORE_FULL_SV);
+    expect(RADIATION_ROOKIE_SV).toBeLessThan(RADIATION_SCORE_ZERO_SV);
   });
 });

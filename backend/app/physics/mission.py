@@ -29,7 +29,7 @@ Mars (ISRU).
 
 Inputs and outputs are SI (m, s, kg, m/s, Sv, USD). Output dates are ISO 8601
 strings and keys are camelCase, so the result is the same plain JSON the JS
-engine returns (schemaVersion 2).
+engine returns (schemaVersion 3).
 """
 
 from __future__ import annotations
@@ -78,7 +78,59 @@ from .vehicles import VEHICLES
 from .windows import BEST_WINDOW_ID, DEFAULT_WINDOW_ID, get_window
 
 #: Output format version (bump when keys change; must equal the JS MISSION_SCHEMA_VERSION).
-MISSION_SCHEMA_VERSION = 2
+MISSION_SCHEMA_VERSION = 3
+
+#: Plain-language note for missions whose dose exceeds the 600 mSv career
+#: limit (NASA-STD-3001). With the measured RAD dose rates, every
+#: conjunction-class mission with MSL-like shielding exceeds it: the two cruise
+#: legs alone give ≈ 0.4-1.0 Sv and the surface stay ≈ 0.25-0.5 Sv more.
+CAREER_LIMIT_NOTE = (
+    "NASA's career limit is 600 mSv (NASA-STD-3001). Every conjunction-class Mars mission "
+    "with today's shielding exceeds it: the two cruise legs and the long surface stay "
+    "together give about 0.8–1.3 Sv. A crewed Mars mission would need much better "
+    "shielding, a much shorter trip, or an exception to the standard."
+)
+
+
+def _format_usd(usd: float) -> str:
+    """Format a launch price for framing notes: '$2.2 B' or '$150 M'."""
+    return f"${to_fixed(usd / 1e9, 1)} B" if usd >= 1e9 else f"${to_fixed(usd / 1e6, 0)} M"
+
+
+def mission_framing(vehicle: Mapping, launch_vehicle: Mapping, dose: Mapping) -> list[dict]:
+    """Framing notes the UI can show next to the numbers, as ``[{id, text}]``.
+
+    ``launcher-cost`` (which launcher the costs assume), ``capture-method``
+    (propulsive vs aerocapture is an architecture choice) and, only if
+    exceeded, ``career-limit``.
+    """
+    if vehicle["launchMode"] == "tanker":
+        fly = "This stage can only fly on its own launcher."
+    else:
+        fly = "This stage can fly on any launcher, and the launch cost changes with that choice."
+    if vehicle["marsCapture"] == "aerocapture":
+        capture = (
+            "Stops at Mars by aerocapture (heat shield, no braking burn); the entry-speed "
+            "limit caps how fast it can arrive."
+        )
+    else:
+        capture = (
+            "Stops at Mars with an engine burn. That is an architecture choice: NASA's DRA 5.0 "
+            "also studied aerocapture for the chemical option, which would remove most of "
+            "that burn."
+        )
+    notes = [
+        {
+            "id": "launcher-cost",
+            "text": f"Costs shown with {launch_vehicle['name']} at "
+            f"{_format_usd(launch_vehicle['costPerLaunchUsd'])} per launch. {fly}",
+        },
+        {"id": "capture-method", "text": capture},
+    ]
+    if dose["exceedsCareerLimit"]:
+        notes.append({"id": "career-limit", "text": CAREER_LIMIT_NOTE})
+    return notes
+
 
 # ── Common crew payload (identical for every vehicle) ──────────────────────
 
@@ -242,7 +294,7 @@ def simulate_mission(
       seed             uint32 for gameplay events; None = nominal flight, no events
       closure          life-support recycling closure (default ISS-class)
 
-    Returns the MissionResult dict (camelCase keys, schemaVersion 2). Raises
+    Returns the MissionResult dict (camelCase keys, schemaVersion 3). Raises
     RangeError for out-of-range inputs or a launch vehicle that cannot lift
     this stage, TypeError for unknown ids.
     """
@@ -413,7 +465,16 @@ def _vehicle_summary(v: Mapping) -> dict:
 
 
 def _launch_vehicle_summary(lv: Mapping) -> dict:
-    return {k: lv[k] for k in ("id", "name", "payloadLeoKg", "costPerLaunchUsd", "status")}
+    keys = (
+        "id",
+        "name",
+        "payloadLeoKg",
+        "costPerLaunchUsd",
+        "status",
+        "reliabilityClass",
+        "launchReliability",
+    )
+    return {k: lv[k] for k in keys}
 
 
 def _transfer_summary(tc: Mapping) -> dict:
@@ -485,6 +546,8 @@ def _build_result(ctx: Mapping, chosen: Mapping, hohmann: Mapping) -> dict:
     }
     dose["total"] = dose["outbound"] + dose["surface"] + dose["return"] + dose["events"]
     dose["careerFraction"] = dose["total"] / CAREER_DOSE_LIMIT
+    dose["careerLimit"] = CAREER_DOSE_LIMIT
+    dose["exceedsCareerLimit"] = dose["total"] > CAREER_DOSE_LIMIT
 
     result = {
         "schemaVersion": MISSION_SCHEMA_VERSION,
@@ -564,6 +627,7 @@ def _build_result(ctx: Mapping, chosen: Mapping, hohmann: Mapping) -> dict:
         ),
         "events": events,
         "eventSummary": event_summary,
+        "framing": mission_framing(vehicle, lv, dose),
     }
     result["score"] = score_mission(result, {"bestWindowId": BEST_WINDOW_ID})
     return result

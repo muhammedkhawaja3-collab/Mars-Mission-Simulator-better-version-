@@ -8,14 +8,34 @@
  *
  * Components (max points):
  *   success     300  heuristic success probability × 300 (0 if the event model aborted the mission)
- *   radiation   200  200 × (1 − mission dose / 600 mSv career limit), floored at 0
+ *   radiation   200  200 × (1.4 Sv − mission dose) / (1.4 Sv − 0.8 Sv), clamped 0–1
  *   propellant  150  150 × (propellant on the minimum-energy transfer / propellant used), capped at 1
  *   cost        150  150 × (1 − log₁₀(cost / $1 B) / log₁₀(30)), clamped 0–1: $1 B → 150, $30 B → 0
  *   transit     200  200 × (330 d − transit) / (330 d − 120 d), clamped 0–1
+ *
+ * Why the radiation scale is not "fraction of the 600 mSv career limit":
+ * every conjunction-class mission exceeds that limit (two cruise legs at
+ * 1.84 mSv/day plus a 13–25 month surface stay at 0.64 mSv/day give
+ * ≈ 0.84–1.26 Sv for the reference vehicles), so a limit-based score would be
+ * 0 for every mission. The scale instead spans the doses real missions reach:
+ * 0.8 Sv is just below the lowest unshielded mission in this model (a fast
+ * transit in a good window), 1.4 Sv is above the slowest minimum-energy
+ * mission plus several solar particle events. As a cross-check, Hassler et
+ * al. (Science 343, 2014) estimated ≈ 1.01 Sv for a 180 d + 500 d + 180 d
+ * mission; this model gives ≈ 0.98 Sv for those durations. The limit itself
+ * is reported, not hidden: see `dose.exceedsCareerLimit` and `framing` in
+ * mission.js.
  */
 import { DAY } from './constants.js';
 
 const clamp01 = (x) => Math.min(1, Math.max(0, x));
+
+/** Mission dose that earns full radiation points [Sv] (design choice, see header). */
+export const RADIATION_SCORE_FULL_SV = 0.8;
+/** Mission dose that earns zero radiation points [Sv] (design choice, see header). */
+export const RADIATION_SCORE_ZERO_SV = 1.4;
+/** Mission dose below which "Radiation Rookie" is earned [Sv]. */
+export const RADIATION_ROOKIE_SV = 0.9;
 
 /** Letter grades by minimum score, best first. */
 export const GRADE_THRESHOLDS = Object.freeze([
@@ -38,8 +58,8 @@ export const ACHIEVEMENTS = Object.freeze([
     test: (m) => m.mass.propellant <= 1.02 * m.mass.hohmannPropellant },
   { id: 'perfect-window', label: 'Perfect Window', description: 'Flew in the cheapest of the fixed launch windows (lowest minimum-energy v∞).',
     test: (m, ctx) => m.windowId !== null && m.windowId === ctx.bestWindowId },
-  { id: 'radiation-rookie', label: 'Radiation Rookie', description: 'Whole-mission dose under half of the 600 mSv career limit.',
-    test: (m) => m.dose.careerFraction < 0.5 },
+  { id: 'radiation-rookie', label: 'Radiation Rookie', description: 'Whole-mission dose under 0.9 Sv (needs a fast transit or extra shielding).',
+    test: (m) => m.dose.total < RADIATION_ROOKIE_SV },
   { id: 'shielded', label: 'Shielded', description: 'Vehicle shielding cuts the deep-space dose rate by at least 25%.',
     test: (m) => m.vehicle.gcrShieldingFactor <= 0.75 },
   { id: 'heavy-lifter', label: 'Heavy Lifter', description: 'Assembled more than 500 t in low Earth orbit.',
@@ -80,9 +100,9 @@ export function scoreMission(m, ctx = {}) {
     },
     {
       id: 'radiation', label: 'Crew radiation dose', max: 200,
-      value: m.dose.careerFraction,
-      points: 200 * clamp01(1 - m.dose.careerFraction),
-      explanation: '200 × (1 − mission dose ÷ 600 mSv career limit).',
+      value: m.dose.total,
+      points: 200 * clamp01((RADIATION_SCORE_ZERO_SV - m.dose.total) / (RADIATION_SCORE_ZERO_SV - RADIATION_SCORE_FULL_SV)),
+      explanation: 'Full marks at 0.8 Sv or less, zero at 1.4 Sv. Every conjunction-class mission exceeds NASA\'s 0.6 Sv career limit, so the scale ranks the doses real missions reach.',
     },
     {
       id: 'propellant', label: 'Propellant efficiency', max: 150,

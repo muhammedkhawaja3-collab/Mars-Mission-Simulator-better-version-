@@ -29,10 +29,15 @@ Sources:
           (RL10C-3 ≈ 460 s).
   [DRA5]  NASA-SP-2009-566 and -ADD: NTR crew vehicle with three ~25 klbf
           engines, Isp ≈ 900 s assumed.
-  [NERVA] Rover/NERVA ground tests 1955-1972 demonstrated ≈ 825-850 s
-          (e.g. Pewee, NRX/XE). No NTR has flown.
-  [SPX]   SpaceX Starship page / user's guide: ≈ 1,200 t propellant in the
-          ship, Raptor Vacuum Isp ≈ 380 s.
+  [NERVA] National Academies, "Space Nuclear Propulsion for Human Mars
+          Exploration" (2021), Table 2.1: Rover/NERVA ground tests 1955-1972
+          reached ideal vacuum Isp of ≈ 810-875 s; the best was Pewee 1
+          (1968), 875 s. No NTR has flown.
+  [SS-EST] ESTIMATE, commonly reported in secondary sources (not published
+          by SpaceX): Raptor Vacuum Isp ≈ 380 s and ≈ 1,200 t of propellant in
+          the Block 1 ship. SpaceX's vehicle page lists 1,500 t (later
+          ≈ 1,600 t) for upgraded ships; the lower Block 1 figure is kept as
+          the conservative choice, like the 100 t payload in launch_vehicles.py.
 Launch-vehicle figures (payload to LEO, cost per launch) live in
 launch_vehicles.py with their own sources.
 """
@@ -88,7 +93,7 @@ VEHICLES: Mapping[str, Mapping] = MappingProxyType(
                 "id": "nuclear",
                 "name": "Nuclear Thermal (advanced concept, never flown)",
                 "engine": "NERVA-derived solid-core NTR, LH₂ propellant",
-                # [DRA5] design assumption; [NERVA] demonstrated ≈ 850 s on the ground
+                # [DRA5] design assumption; [NERVA] best ground test 875 s (Pewee 1)
                 "isp": 900,
                 # ESTIMATE: three ~3.5 t engines with internal shields, external
                 # shadow shields, and large LH₂ tanks with cryocoolers. LH₂ is only
@@ -104,8 +109,8 @@ VEHICLES: Mapping[str, Mapping] = MappingProxyType(
                 "operationReliability": 0.995,
                 "color": "#3B8BD4",
                 "notes": [
-                    "Isp 900 s is the DRA 5.0 design value; ground tests in the 1960s–70s "
-                    "reached ≈ 850 s.",
+                    "Isp 900 s is the DRA 5.0 design value; the best 1960s–70s ground test "
+                    "(Pewee 1, 1968) reached 875 s.",
                     "No nuclear thermal rocket has ever flown; development cost is not included.",
                 ],
             }
@@ -115,10 +120,11 @@ VEHICLES: Mapping[str, Mapping] = MappingProxyType(
                 "id": "starship",
                 "name": "Starship (CH₄/LOX)",
                 "engine": "Raptor Vacuum, CH₄/LOX full-flow staged combustion",
-                "isp": 380,  # [SPX]
+                "isp": 380,  # [SS-EST] ESTIMATE: SpaceX does not publish Raptor Vacuum Isp
                 # ESTIMATE: not published; public estimates span ≈ 100-150 t
                 "stageDryMass": 120_000,
-                "propellantCapacity": 1_200_000,  # [SPX]
+                # [SS-EST] ESTIMATE: Block 1 ship, secondary sources
+                "propellantCapacity": 1_200_000,
                 "marsCapture": "aerocapture",
                 # ESTIMATE: about 7.5 km/s entry speed, from SpaceX public statements;
                 # not demonstrated at Mars.
@@ -141,6 +147,8 @@ VEHICLES: Mapping[str, Mapping] = MappingProxyType(
                     "which is not yet demonstrated at scale.",
                     "Stops at Mars with its heat shield (aerocapture), so it needs no braking "
                     "burn but caps the arrival speed.",
+                    "Isp 380 s and 1,200 t of propellant are commonly reported figures; "
+                    "SpaceX does not publish Raptor Isp.",
                 ],
             }
         ),

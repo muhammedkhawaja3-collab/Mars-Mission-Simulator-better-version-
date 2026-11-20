@@ -31,7 +31,9 @@ launch. Schedule penalty = that × REFLIGHT_DELAY_DAYS.
 
 Every per-event probability below is a HEURISTIC chosen to reflect flight
 heritage (operational launchers succeed ≈ 98-99+ % of the time; new,
-never-flown systems get lower values). None is measured data.
+never-flown systems get lower values). None is measured data. The launch
+term depends on the launcher's reliability class (launch_vehicles.py):
+proven 0.99, limited history 0.97, planned/never flown 0.96, flight test 0.95.
 """
 
 from __future__ import annotations
@@ -41,7 +43,8 @@ from collections.abc import Mapping
 
 from .jscompat import RangeError, js_str, to_fixed
 
-#: Heuristic probability that one launch succeeds (same for every launcher; not per-vehicle data).
+#: Heuristic per-launch success probability of a proven launcher. Used only
+#: when a launch vehicle carries no ``launchReliability`` of its own.
 LAUNCH_RELIABILITY = 0.99
 
 #: Heuristic probability of Mars entry, descent and landing (same lander for every architecture).
@@ -74,6 +77,13 @@ def success_estimate(
     burns = 2 if propulsive else 1
     op_rel = vehicle["operationReliability"]
     burn_rel = vehicle["burnReliability"]
+    launch_rel = launch_vehicle.get("launchReliability")
+    if launch_rel is None:
+        launch_rel = LAUNCH_RELIABILITY
+    basis = (
+        f"; {launch_vehicle['reliabilityBasis']}" if launch_vehicle.get("reliabilityBasis") else ""
+    )
+    rel_class = launch_vehicle.get("reliabilityClass") or "proven"
 
     if tanker:
         docking_expl = (
@@ -92,9 +102,10 @@ def success_estimate(
         {
             "id": "crewed-launch",
             "label": "Crewed launch",
-            "probability": LAUNCH_RELIABILITY,
-            "explanation": "The one launch carrying the crew must succeed "
-            f"(heuristic {to_fixed(LAUNCH_RELIABILITY * 100, 0)}% per launch).",
+            "probability": launch_rel,
+            "explanation": "The one launch carrying the crew must succeed: heuristic "
+            f"{to_fixed(launch_rel * 100, 0)}% per launch for {launch_vehicle.get('name')} "
+            f"({rel_class}{basis}).",
         },
         {
             "id": "crew-dockings",
@@ -140,7 +151,7 @@ def success_estimate(
     for f in factors:
         probability = probability * f["probability"]
 
-    element_reliability = LAUNCH_RELIABILITY if tanker else LAUNCH_RELIABILITY * op_rel
+    element_reliability = launch_rel if tanker else launch_rel * op_rel
     expected_reflights = (uncrewed * (1 - element_reliability)) / element_reliability
     return {
         "probability": probability,

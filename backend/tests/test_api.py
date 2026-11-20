@@ -39,7 +39,7 @@ def assert_error(resp, status: int, code: str) -> dict:
 def test_health(client: TestClient) -> None:
     resp = client.get("/api/health")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok", "version": "4.0.0", "schemaVersion": 2}
+    assert resp.json() == {"status": "ok", "version": "4.0.0", "schemaVersion": 3}
     assert resp.headers["x-request-id"]
 
 

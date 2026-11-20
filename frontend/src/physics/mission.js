@@ -47,7 +47,53 @@ import { scoreMission } from './scoring.js';
 import { validateSeed } from './rng.js';
 
 /** Output format version (bump when keys change; the Python mirror checks it). */
-export const MISSION_SCHEMA_VERSION = 2;
+export const MISSION_SCHEMA_VERSION = 3;
+
+/**
+ * Plain-language note for missions whose dose exceeds the 600 mSv career
+ * limit (NASA-STD-3001). With the measured RAD dose rates, every
+ * conjunction-class mission with MSL-like shielding exceeds it: the two cruise
+ * legs alone give ≈ 0.4–1.0 Sv and the surface stay ≈ 0.25–0.5 Sv more.
+ */
+export const CAREER_LIMIT_NOTE =
+  "NASA's career limit is 600 mSv (NASA-STD-3001). Every conjunction-class Mars mission with today's shielding exceeds it: " +
+  'the two cruise legs and the long surface stay together give about 0.8–1.3 Sv. A crewed Mars mission would need much better ' +
+  'shielding, a much shorter trip, or an exception to the standard.';
+
+/** Formats a launch price for framing notes: '$2.2 B' or '$150 M'. */
+function formatUsd(usd) {
+  return usd >= 1e9 ? `$${(usd / 1e9).toFixed(1)} B` : `$${(usd / 1e6).toFixed(0)} M`;
+}
+
+/**
+ * Framing notes the UI can show next to the numbers, as [{id, text}]:
+ *   'launcher-cost'  which launcher the costs assume (costs depend on it);
+ *   'capture-method' that propulsive vs aerocapture is an architecture choice;
+ *   'career-limit'   (only if exceeded) that the dose is over NASA's limit.
+ * @param {import('./vehicles.js').Vehicle} vehicle
+ * @param {import('./launchVehicles.js').LaunchVehicle} launchVehicle
+ * @param {{exceedsCareerLimit:boolean}} dose
+ * @returns {Array<{id:string, text:string}>}
+ */
+export function missionFraming(vehicle, launchVehicle, dose) {
+  const notes = [
+    {
+      id: 'launcher-cost',
+      text: `Costs shown with ${launchVehicle.name} at ${formatUsd(launchVehicle.costPerLaunchUsd)} per launch. ` +
+        (vehicle.launchMode === 'tanker'
+          ? 'This stage can only fly on its own launcher.'
+          : 'This stage can fly on any launcher, and the launch cost changes with that choice.'),
+    },
+    {
+      id: 'capture-method',
+      text: vehicle.marsCapture === 'aerocapture'
+        ? 'Stops at Mars by aerocapture (heat shield, no braking burn); the entry-speed limit caps how fast it can arrive.'
+        : "Stops at Mars with an engine burn. That is an architecture choice: NASA's DRA 5.0 also studied aerocapture for the chemical option, which would remove most of that burn.",
+    },
+  ];
+  if (dose.exceedsCareerLimit) notes.push({ id: 'career-limit', text: CAREER_LIMIT_NOTE });
+  return notes;
+}
 
 /* ── Common crew payload (identical for every vehicle) ──────────────────── */
 
@@ -333,7 +379,15 @@ function vehicleSummary(v) {
 }
 
 function launchVehicleSummary(lv) {
-  return { id: lv.id, name: lv.name, payloadLeoKg: lv.payloadLeoKg, costPerLaunchUsd: lv.costPerLaunchUsd, status: lv.status };
+  return {
+    id: lv.id,
+    name: lv.name,
+    payloadLeoKg: lv.payloadLeoKg,
+    costPerLaunchUsd: lv.costPerLaunchUsd,
+    status: lv.status,
+    reliabilityClass: lv.reliabilityClass,
+    launchReliability: lv.launchReliability,
+  };
 }
 
 function inputsSummary(ctx) {
@@ -383,6 +437,8 @@ function buildResult(ctx, chosen, hohmann) {
   };
   dose.total = dose.outbound + dose.surface + dose.return + dose.events;
   dose.careerFraction = dose.total / CAREER_DOSE_LIMIT;
+  dose.careerLimit = CAREER_DOSE_LIMIT;
+  dose.exceedsCareerLimit = dose.total > CAREER_DOSE_LIMIT;
 
   const result = {
     schemaVersion: MISSION_SCHEMA_VERSION,
@@ -449,6 +505,7 @@ function buildResult(ctx, chosen, hohmann) {
     crewHealthIndex: crewHealthIndex({ missionDose: dose.total, microgravityTime: outbound + returnTime }),
     events,
     eventSummary,
+    framing: missionFraming(vehicle, launchVehicle, dose),
   };
   result.score = scoreMission(result, { bestWindowId: BEST_WINDOW_ID });
   return result;

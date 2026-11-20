@@ -72,7 +72,7 @@ def mission(req: MissionRequest) -> dict | JSONResponse:
     """Simulate one mission with the Python mirror of the JS physics engine.
 
     The result has the same keys and values as the JS ``simulateMission``
-    (schemaVersion 2). An infeasible transfer is a 200 with
+    (schemaVersion 3). An infeasible transfer is a 200 with
     ``feasible: false`` and an ``infeasibleReason``; a disallowed stage ×
     launcher combination is a 422 with code ``unsupported_combination``.
     """

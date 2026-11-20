@@ -31,10 +31,15 @@
  *
  * Every per-event probability below is a HEURISTIC chosen to reflect flight
  * heritage (operational launchers succeed ≈ 98–99+ % of the time; new,
- * never-flown systems get lower values). None is measured data.
+ * never-flown systems get lower values). None is measured data. The launch
+ * term depends on the launcher's reliability class (launchVehicles.js):
+ * proven 0.99, limited history 0.97, planned/never flown 0.96, flight test 0.95.
  */
 
-/** Heuristic probability that one launch succeeds (same for every launcher; not per-vehicle data). */
+/**
+ * Heuristic per-launch success probability of a proven launcher. Used only
+ * when a launch vehicle carries no `launchReliability` of its own.
+ */
 export const LAUNCH_RELIABILITY = 0.99;
 
 /** Heuristic probability of Mars entry, descent and landing (same lander assumption for every architecture). */
@@ -82,13 +87,15 @@ export function successEstimate({ vehicle, launchVehicle, launches, margin }) {
   const crewDockings = tanker ? uncrewed : (launches > 1 ? 1 : 0);
   const propulsive = vehicle.marsCapture === 'propulsive';
   const burns = propulsive ? 2 : 1;
+  const launchReliability = launchVehicle.launchReliability ?? LAUNCH_RELIABILITY;
+  const basis = launchVehicle.reliabilityBasis ? `; ${launchVehicle.reliabilityBasis}` : '';
 
   const factors = [
     {
       id: 'crewed-launch',
       label: 'Crewed launch',
-      probability: LAUNCH_RELIABILITY,
-      explanation: `The one launch carrying the crew must succeed (heuristic ${(LAUNCH_RELIABILITY * 100).toFixed(0)}% per launch).`,
+      probability: launchReliability,
+      explanation: `The one launch carrying the crew must succeed: heuristic ${(launchReliability * 100).toFixed(0)}% per launch for ${launchVehicle.name} (${launchVehicle.reliabilityClass ?? 'proven'}${basis}).`,
     },
     {
       id: 'crew-dockings',
@@ -129,7 +136,7 @@ export function successEstimate({ vehicle, launchVehicle, launches, margin }) {
   ];
   const probability = factors.reduce((p, f) => p * f.probability, 1);
 
-  const elementReliability = tanker ? LAUNCH_RELIABILITY : LAUNCH_RELIABILITY * vehicle.operationReliability;
+  const elementReliability = tanker ? launchReliability : launchReliability * vehicle.operationReliability;
   const expectedReflights = (uncrewed * (1 - elementReliability)) / elementReliability;
   return {
     probability,
