@@ -1,5 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
+import {
+  simulateMission, launchWindows, createCustomVehicle, summarizeTradeoffs, exhaustVelocity,
+  VEHICLES, VEHICLE_IDS, CREW_PAYLOAD, deltaVMargin,
+  toDays, fromDays, toKmPerSecond, toTonnes, toMilliSieverts, toBillionUsd, toMillionKm,
+} from './physics/index.js';
 
 /* ══════════════════════════════════════════════════════════
    REAL ENGINE CATALOG — All specs from verified sources
@@ -24,7 +29,7 @@ const ENGINE_CATALOG = [
     desc:'Falcon 9 upper stage. Most-flown vacuum engine. Pintle injector. 200+ successful firings.' },
   { id:'rd180',    name:'RD-180',          family:'RP-1/LOX',     isp:338, thrust:3830,  trl:9, failRate:0.02, electric:false,
     desc:'Energomash staged combustion. Atlas V first stage. 100+ flights. Oxygen-rich preburner.' },
-  // Nuclear Thermal (2× ISP of chemical → 4× less propellant for same ΔV)
+  // Nuclear Thermal (≈2× the ISP of chemical: more Δv per tonne of propellant, but heavier engines/tanks)
   { id:'nerva_xe', name:'NERVA XE Prime',  family:'NTR (LH₂)',    isp:841, thrust:223,   trl:6, failRate:0.07, electric:false,
     desc:'Los Alamos/Aerojet 1969. Only NTR ever run at full rated power. 841s ISP measured. 20-min endurance.' },
   { id:'pewee',    name:'Pewee-1',         family:'NTR (LH₂)',    isp:845, thrust:111,   trl:5, failRate:0.08, electric:false,
@@ -77,11 +82,10 @@ const HAZARD_EVENTS = [
 ];
 
 /* ══════════════════════════════════════════════════════════
-   CONSTANTS + PHYSICS FORMULAS
-   (defined before BASE_ROCKETS so transit is computed, not hardcoded)
+   PHYSICS ENGINE ADAPTER
+   All mission numbers come from src/physics (simulateMission). This block
+   only converts SI results into the display units the UI already uses.
    ══════════════════════════════════════════════════════════ */
-const DISTANCES = { 2027:97.7, 2029:81.5, 2031:101.2, 2033:62.1, 2035:95.4 };
-const RAD_RATE  = 1.3;   // mSv/day — Curiosity RAD, Zeitlin et al. Science 2013
 const RACE_MS   = 60000;
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
@@ -94,207 +98,154 @@ const safeStorageSet = (key, value) => {
   try { window.localStorage.setItem(key, value); } catch { /* storage unavailable */ }
 };
 
-// Transit calibrated to NASA anchors (verified against DRA 5.0 and Borowski AIAA-2012-5144)
-// physTransit(4.5)=242d ≈ DRA 5.0 Chemical 247d  |  physTransit(7.2)=123d = Borowski NTR 123.5d  |  physTransit(3.8)=288d exact
-const physTransit = dv => +clamp(742 * Math.exp(-0.249 * dv), 80, 360).toFixed(1);
-const radColor    = v  => v < 200 ? '#6edc52' : v < 350 ? '#f4ae2a' : '#ff5555';
+const radColor = v => v < 200 ? '#6edc52' : v < 350 ? '#f4ae2a' : '#ff5555';
+const round = (v, digits = 1) => +v.toFixed(digits);
+const fmtDate = (d) => d.toISOString().slice(0, 10);
 
-// ── Real health metrics (no fabricated formulas) ──
-// careerRadPct: radiation / 600 mSv × 100 — NASA STD-3001 Rev C (2023) career limit 600 mSv
-// boneLossPct:  (transit / 30) × 0.43 — Leblanc et al. 2007, Osteoporosis Intl (0.43%/month hip, with ARED)
-//               Centrifuge hab at 0.38g (Mars gravity): 0.15%/month — reduces loss ~65%
-// abortDv:      deltaV − 3.5 km/s minimum — real ΔV reserve for mid-course abort (pure physics)
-const CAREER_RAD_LIMIT = 600; // mSv — NASA STD-3001 Rev C sex-neutral limit, 3% REID at age 35 (NCRP 132)
-const BONE_RATE        = 0.43; // %/month — Leblanc et al. 2007 PMID:17047197, hip with ARED countermeasures
-const BONE_RATE_CENTRIFUGE = 0.15; // %/month — estimated at 0.38g Mars gravity (Cavanagh et al. 2010)
-const MIN_MARS_DV      = 3.5;  // km/s — minimum ΔV to complete Earth–Mars transit + orbit capture
+// Next five Earth→Mars launch windows, from planet positions (JPL mean elements).
+const LAUNCH_WINDOWS = launchWindows({ after: new Date(), count: 5 });
 
-// ── Base radiation helper (transit computed from deltaV, not hardcoded) ──
-// NTR shield: 4,000 kg LH₂ shadow shield, factor 0.93 (7% reduction — Borowski 2012)
-const _baseRad = (dv, shieldFactor) =>
-  +(RAD_RATE * physTransit(dv) * shieldFactor).toFixed(1);
+const TRANSFER_OPTIONS = [
+  { id: 'fastest', label: 'Fastest each vehicle can fly', choice: { kind: 'fastest' },
+    hint: 'Each vehicle burns its full tank load (minus the risk margin) on the fastest transfer it can fly.' },
+  { id: 'hohmann', label: 'Minimum-energy (Hohmann-type)', choice: { kind: 'hohmann' },
+    hint: 'Every vehicle flies the same slow, cheap trajectory. Compare propellant, launches and cost.' },
+  { id: 'tof200', label: 'Fixed 200-day transfer', choice: { kind: 'timeOfFlight', timeOfFlight: fromDays(200) },
+    hint: 'Every vehicle flies the same 200-day trajectory, if it can.' },
+];
 
-/* ══════════════════════════════════════════════════════════
-   BASE ROCKETS — all transit/radiation derived from physics, not hardcoded
-   ══════════════════════════════════════════════════════════ */
-const BASE_ROCKETS = {
-  chemical: {
-    label:'Chemical', shortLabel:'CHEM', color:'#E24B4A',
-    engineType:'LH₂/LOX — J-2X class',
-    // ISP 450s → Ve = 450×9.81 = 4,414 m/s → ΔV 4.5 km/s (TMI+MOI, NASA DRA 5.0)
-    isp:450, exhaustVelocity:4414, thrust:890, deltaV:4.5, trl:9,
-    // physTransit(4.5) = 742×e^(-0.249×4.5) = 242d  (DRA 5.0 baseline: 247d, within 2%)
-    transit:   physTransit(4.5),
-    // 1.3 mSv/day × 242 days × 1.0 (no shielding)
-    radiation: _baseRad(4.5, 1.0),
-    propellant:311147, cost:10.8, launches:4,
-    // abortDv: 4.5 − 3.5 = 1.0 km/s reserve (tight — few abort options mid-transit)
-    abortDv: 1.0,
-    // careerRadPct: 314.6 mSv / 600 mSv × 100 = 52.4% (NASA STD-3001 Rev C)
-    careerRadPct: +(_baseRad(4.5, 1.0) / CAREER_RAD_LIMIT * 100).toFixed(1),
-    // boneLossPct: 242d / 30 × 0.43%/month = 3.5% hip loss (Leblanc et al. 2007)
-    boneLossPct: +(physTransit(4.5) / 30 * BONE_RATE).toFixed(1),
-    shieldingMass:0, payloadMars:20000,
-    source:'NASA DRA 5.0 (2009) · J-2X 448s MSFC · ΔV=4.5 km/s (TMI+MOI) · 4×SLS @$2.7B ea.',
-  },
-  nuclear: {
-    label:'Nuclear Thermal', shortLabel:'NTR', color:'#3B8BD4',
-    engineType:'NERVA-derived NTR — LH₂',
-    // ISP 900s → Ve = 900×9.81 = 8,829 m/s → ΔV 7.2 km/s (Borowski fast-transit)
-    // ISP is 2× Chemical → Ve 2× higher → same ΔV with 4× less propellant
-    isp:900, exhaustVelocity:8829, thrust:670, deltaV:7.2, trl:5,
-    // physTransit(7.2) = 742×e^(-0.249×7.2) = 123d  (Borowski AIAA-2012-5144: 123.5d — exact match)
-    transit:   physTransit(7.2),
-    // 1.3 mSv/day × 123d × 0.93 (4t LH₂ shadow shield, 7% reduction — Borowski 2012)
-    radiation: _baseRad(7.2, 0.93),
-    propellant:79394, cost:5.4, launches:1,
-    // abortDv: 7.2 − 3.5 = 3.7 km/s reserve (excellent — multiple abort trajectories available)
-    abortDv: 3.7,
-    // careerRadPct: 149.4 mSv / 600 mSv × 100 = 24.9% (NASA STD-3001 Rev C)
-    careerRadPct: +(_baseRad(7.2, 0.93) / CAREER_RAD_LIMIT * 100).toFixed(1),
-    // boneLossPct: 123.5d / 30 × 0.43%/month = 1.8% hip loss (Leblanc et al. 2007)
-    boneLossPct: +(physTransit(7.2) / 30 * BONE_RATE).toFixed(1),
-    shieldingMass:4000, payloadMars:56000,
-    source:'Borowski et al. AIAA-2012-5144 · NERVA XE 841s achieved 1969 · 900s design target · 4t shadow shield',
-  },
-  starship: {
-    label:'Starship', shortLabel:'SHP', color:'#1D9E75',
-    engineType:'Raptor 2 Vacuum — CH₄/LOX',
-    // ISP 380s → Ve = 380×9.81 = 3,727 m/s → ΔV 3.8 km/s (per stage after depot refuel)
-    isp:380, exhaustVelocity:3727, thrust:7500, deltaV:3.8, trl:7,
-    // physTransit(3.8) = 742×e^(-0.249×3.8) = 288d  (SpaceX reference — exact match)
-    transit:   physTransit(3.8),
-    // 1.3 mSv/day × 288d × 1.0 (no dedicated shielding, hull only)
-    radiation: _baseRad(3.8, 1.0),
-    propellant:582455, cost:1.8, launches:6,
-    // abortDv: 3.8 − 3.5 = 0.3 km/s reserve (critical — almost no abort margin, single abort window)
-    abortDv: 0.3,
-    // careerRadPct: 374.7 mSv / 600 mSv × 100 = 62.5% (NASA STD-3001 Rev C)
-    careerRadPct: +(_baseRad(3.8, 1.0) / CAREER_RAD_LIMIT * 100).toFixed(1),
-    // boneLossPct: 288d / 30 × 0.43%/month = 4.1% hip loss (Leblanc et al. 2007)
-    boneLossPct: +(physTransit(3.8) / 30 * BONE_RATE).toFixed(1),
-    shieldingMass:0, payloadMars:100000,
-    source:'SpaceX Raptor 2 spec 2023 (380s) · IFT-4 2024 · 6 tanker launches for LEO depot refuel',
-  },
+// Bone loss stays a UI-level illustration (the engine reports zero-g time).
+// careerRadPct uses the NASA-STD-3001 600 mSv career limit from the engine constants.
+const BONE_RATE            = 0.43; // %/month — hip, with exercise countermeasures (Leblanc et al. 2007)
+const BONE_RATE_CENTRIFUGE = 0.15; // %/month — illustrative estimate for an artificial-gravity habitat
+
+/* Display metadata for the reference fleet (numbers come from the engine). */
+const FLEET_DISPLAY = {
+  chemical: { label:'Chemical', shortLabel:'CHEM', engineType:'LH₂/LOX — RL10-class',
+    source:'RL10 Isp ≈ 460 s · 300 t wet stage · SLS-class launches (NASA OIG 2022 ≈ $2.2B each)' },
+  nuclear:  { label:'Nuclear Thermal', shortLabel:'NTR', engineType:'NERVA-derived NTR — LH₂',
+    source:'Isp 900 s (DRA 5.0 design value; ≈ 850 s demonstrated in ground tests) · same 300 t wet stage · never flown' },
+  starship: { label:'Starship', shortLabel:'SHP', engineType:'Raptor Vacuum — CH₄/LOX',
+    source:'Isp 380 s · 1,200 t tanks refilled in LEO by tankers · aerocapture at Mars (entry ≤ 7.5 km/s, est.)' },
 };
 
-// Compute all stats for player rocket from chosen real components
-const computePlayerStats = (parts) => {
+/** Convert an engine MissionResult (SI) into the flat display object the UI renders. */
+const toDisplayRocket = (mission, vehicle, display, extra = {}) => {
+  const base = {
+    ...display,
+    color: vehicle.color,
+    trl: vehicle.trl,
+    isp: vehicle.isp,
+    exhaustVelocity: Math.round(exhaustVelocity(vehicle.isp)),
+    departureDate: mission.departureDate,
+    ...extra,
+  };
+  if (!mission.feasible) {
+    return {
+      ...base, failed: true, failReason: mission.infeasibleReason,
+      transit: 0, radiation: 0, missionDose: 0, careerRadPct: 0, boneLossPct: 0, propellant: 0,
+      imleo: 0, cost: 0, launches: 0, success: 0, crewHealth: 0, avgVelocity: 0, pathMkm: 0,
+      abortDv: 0, deltaV: mission.deltaV ? round(toKmPerSecond(mission.deltaV.total), 2) : 0,
+    };
+  }
+  const transit = round(toDays(mission.transitTime));
+  const boneRate = extra.habName === 'Centrifuge Hab' ? BONE_RATE_CENTRIFUGE : BONE_RATE;
+  return {
+    ...base,
+    failed: false,
+    failReason: null,
+    transit,
+    radiation:    round(toMilliSieverts(mission.dose.transit)),
+    missionDose:  round(toMilliSieverts(mission.dose.mission), 0),
+    careerRadPct: round(mission.dose.careerFraction * 100),
+    boneLossPct:  round(transit / 30 * boneRate),
+    surfaceStay:  Math.round(toDays(mission.duration.surfaceStay)),
+    propellant:   Math.round(mission.mass.propellant),
+    imleo:        round(toTonnes(mission.mass.initialMassInLEO), 0),
+    cost:         round(toBillionUsd(mission.cost.total), 2),
+    launches:     mission.launches,
+    deltaV:       round(toKmPerSecond(mission.deltaV.total), 2),
+    deltaVDeparture: round(toKmPerSecond(mission.deltaV.departure), 2),
+    deltaVCapture:   round(toKmPerSecond(mission.deltaV.capture), 2),
+    abortDv:      round(toKmPerSecond(mission.deltaV.reserve), 2),
+    avgVelocity:  round(toKmPerSecond(mission.averageSpeed), 1),
+    pathMkm:      round(toMillionKm(mission.pathLength), 0),
+    success:      round(mission.success.probability * 100),
+    crewHealth:   round(mission.crewHealthIndex, 0),
+    mission,
+  };
+};
+
+// Builder parts → engine vehicle. Habitat mass comes from the chosen hab module;
+// structure = tank structure + shielding + 3 t bus/engine allowance (estimate).
+const BUS_MASS = 3000;
+const computePlayerStats = (parts, params) => {
   const eng    = ENGINE_CATALOG.find(e => e.id === parts.engine);
   const tank   = TANK_OPTIONS.find(t => t.id === parts.tank);
   const shield = SHIELD_OPTIONS.find(s => s.id === parts.shield);
   const hab    = HAB_OPTIONS.find(h => h.id === parts.hab);
   if (!eng || !tank || !shield || !hab) return null;
 
-  // ── Tsiolkovsky rocket equation — no fabrication ──
-  // dry mass = habitat structure + shield + tank structure + 3,000 kg bus baseline
-  const dryMass  = hab.dryMass + shield.mass + tank.structMass + 3000;
-  const propMass = tank.capacity;
-  const ve       = (eng.isp * 9.8066) / 1000;                          // exhaust velocity km/s
-  const dv       = +(ve * Math.log((dryMass + propMass) / dryMass)).toFixed(2); // Tsiolkovsky ΔV
-  const transit  = physTransit(dv);                                     // days — calibrated to NASA DRA 5.0
-  const rad      = +(RAD_RATE * transit * shield.factor).toFixed(1);   // mSv — 1.3 mSv/day × days × shield
-
-  // ── Real health metrics — sourced, no coefficients invented ──
-  // abortDv: ΔV reserve above minimum (pure physics)
-  const abortDv      = +(Math.max(0, dv - MIN_MARS_DV)).toFixed(2);
-  // careerRadPct: % of NASA STD-3001 Rev C career limit consumed
-  const careerRadPct = +(rad / CAREER_RAD_LIMIT * 100).toFixed(1);
-  // boneLossPct: transit months × rate from Leblanc et al. 2007 ISS data
-  const boneRate     = hab.id === 'centrifuge' ? BONE_RATE_CENTRIFUGE : BONE_RATE;
-  const boneLossPct  = +(transit / 30 * boneRate).toFixed(1);
-
-  // ── Failure check ──
-  const canReach = dv >= MIN_MARS_DV && !eng.electric;
-  const name     = (parts.name || '').trim() || 'MY ROCKET';
-
-  // ── Payload to Mars: Tsiolkovsky mass fraction ──
-  // useful payload = propellant tank capacity × (1 − wet/dry ratio factor)
-  // Real: higher ISP → better mass ratio → more payload capacity
-  const massRatio   = (dryMass + propMass) / dryMass;
-  const payloadMars = Math.max(3000, Math.round(dryMass * (massRatio - 1) * 0.08));
-
-  return {
-    label:           name,
-    shortLabel:      name.replace(/\s+/g,'').slice(0,4).toUpperCase() || 'CUST',
-    color:           parts.color,
-    isp:             eng.isp,
-    exhaustVelocity: Math.round(eng.isp * 9.8066),
-    thrust:          eng.thrust,
-    engineType:      `${eng.name} — ${eng.family}`,
-    engineName:      eng.name,
-    deltaV:          dv,
-    trl:             eng.trl,
-    transit,
-    propellant:      propMass,
-    radiation:       rad,
-    shieldingMass:   shield.mass,
-    dryMass,
-    abortDv,
-    careerRadPct,
-    boneLossPct,
-    // Cost: tank launches × ~$300M/launch + NTR dev amortised (rough estimate, labelled as estimate)
-    cost:            +(Math.ceil(propMass / 200000) * 0.3 + 2.5).toFixed(1),
-    launches:        Math.max(1, Math.ceil(propMass / 200000)),
-    payloadMars,
-    failed:          !canReach,
-    failReason:      eng.electric
-      ? `ELECTRIC DRIVE — VASIMR/ion thrust ${eng.thrust} kN is insufficient for crewed impulsive burn`
-      : dv < MIN_MARS_DV
-        ? `INSUFFICIENT ΔV: ${dv} km/s computed — need ≥${MIN_MARS_DV} km/s for Mars capture`
-        : null,
-    engineFailRate:  eng.failRate,
-    habName:         hab.name,
-    shieldName:      shield.name,
-    tankName:        tank.name,
-    source:          `${eng.name} ISP ${eng.isp}s · TRL ${eng.trl} · ${hab.name} · ${shield.name} · Tsiolkovsky ΔV`,
+  const name = (parts.name || '').trim() || 'MY ROCKET';
+  const stageDryMass = tank.structMass + shield.mass + BUS_MASS;
+  const display = {
+    label: name,
+    shortLabel: name.replace(/\s+/g,'').slice(0,4).toUpperCase() || 'CUST',
+    engineType: `${eng.name} — ${eng.family}`,
+    source: `${eng.name} ISP ${eng.isp}s · TRL ${eng.trl} · ${hab.name} · ${shield.name} · ${tank.name}`,
   };
+  const extra = {
+    parts: { ...parts },
+    engineName: eng.name, habName: hab.name, shieldName: shield.name, tankName: tank.name,
+    stageDryMass, habitatMass: hab.dryMass, propellantCapacity: tank.capacity,
+  };
+  const vehicle = createCustomVehicle({
+    name, isp: eng.isp, stageDryMass, propellantCapacity: tank.capacity,
+    trl: eng.trl, gcrShieldingFactor: shield.factor, color: parts.color,
+  });
+  if (eng.electric) {
+    // Impulsive-burn patched conics do not apply to months-long low-thrust spirals.
+    const mission = { feasible: false, departureDate: params.window.departureDate, deltaV: null,
+      infeasibleReason: `ELECTRIC DRIVE — ${eng.thrust} kN of thrust cannot perform the impulsive burns this crewed transfer model assumes` };
+    return toDisplayRocket(mission, vehicle, display, extra);
+  }
+  const mission = simulateMission({
+    vehicle, crewSize: params.crewSize, launchDate: params.window.departureDate,
+    transferChoice: params.transferChoice, riskTolerance: params.risk, habitatMass: hab.dryMass,
+  });
+  return toDisplayRocket(mission, vehicle, display, extra);
 };
 
-// Scale rocket for mission parameters (distance, crew size)
-// Only real physics scaling — no fabricated multipliers
-const scaleRocket = (base, crewSize, distance) => {
-  const df   = distance / 97.7;                           // distance scale factor vs 97.7 M km baseline
-  // crew propellant factor: each extra crew ~1,000 kg + life support mass, scales propellant need
-  const cpf  = 1 + (crewSize - 4) * 0.08;
-  // crew radiation factor: more crew → heavier hab → same radiation per person (no change to dose rate)
-  // Note: dose rate 1.3 mSv/day is per-person, independent of crew size — this factor is for total mission mass only
-  const crf  = 1.0; // radiation dose is per-person — does NOT scale with crew count
-  const ccf  = 1 + (crewSize - 4) * 0.075;              // cost scales with heavier launch mass
-  const cpay = clamp(1 - (crewSize - 4) * 0.04, 0.7, 1.1);
-  const transit   = +(base.transit * df).toFixed(1);
-  const radiation = +(base.radiation * df * crf).toFixed(1); // scales with distance (longer transit = more GCR)
-  return {
-    ...base,
-    transit,
-    radiation,
-    propellant:    Math.round(base.propellant * df * cpf),
-    cost:          +(base.cost * ccf).toFixed(2),
-    payloadMars:   Math.max(5000, Math.round(base.payloadMars * cpay)),
-    avgVelocity:   +(distance * 1e6 / (transit * 86400)).toFixed(2),
-    // ── Real health metrics recomputed from scaled transit/radiation ──
-    // abortDv does NOT change with distance — determined by engine ISP alone
-    abortDv:       base.abortDv,
-    // careerRadPct scales with radiation (which scales with transit, which scales with distance)
-    careerRadPct:  +(radiation / CAREER_RAD_LIMIT * 100).toFixed(1),
-    // boneLossPct scales with transit (0.43%/month Leblanc 2007 — same rate regardless of distance)
-    boneLossPct:   +(transit / 30 * BONE_RATE).toFixed(1),
-  };
+/** Simulate the reference fleet for the current mission parameters. */
+const simulateFleet = (params) => {
+  const out = {};
+  VEHICLE_IDS.forEach((id) => {
+    const vehicle = VEHICLES[id];
+    const mission = simulateMission({
+      vehicle, crewSize: params.crewSize, launchDate: params.window.departureDate,
+      transferChoice: params.transferChoice, riskTolerance: params.risk,
+    });
+    out[id] = toDisplayRocket(mission, vehicle, FLEET_DISPLAY[id]);
+  });
+  return out;
 };
 
 const METRICS = [
-  { key:'transit',      label:'Transit Time',                         unit:'days',  lo:true,  src:'NASA DRA 5.0 / Borowski AIAA-2012-5144' },
-  { key:'avgVelocity',  label:'Avg Cruise Speed',                     unit:'km/s',  lo:false, src:'Distance ÷ transit time · actual travel speed' },
-  { key:'radiation',    label:'Radiation Dose (GCR)',                 unit:'mSv',   lo:true,  src:'Curiosity RAD · Zeitlin et al. Science 2013' },
-  { key:'careerRadPct', label:'Career Rad. Limit Used',               unit:'%',     lo:true,  src:'NASA STD-3001 Rev C 2023 · 600 mSv limit' },
-  { key:'boneLossPct',  label:'Hip Bone Density Loss',                unit:'%',     lo:true,  src:'Leblanc et al. 2007, Osteoporosis Intl (0.43%/month ARED)' },
-  { key:'abortDv',      label:'Abort ΔV Reserve',                     unit:'km/s',  lo:false, src:'Tsiolkovsky: deltaV − 3.5 km/s minimum' },
+  { key:'transit',      label:'Transit Time (outbound)',              unit:'days',  lo:true,  src:'Patched conics, JPL mean planetary elements' },
+  { key:'avgVelocity',  label:'Avg Heliocentric Speed',               unit:'km/s',  lo:false, src:'Transfer arc length ÷ transit time' },
+  { key:'radiation',    label:'Transit Dose (outbound)',              unit:'mSv',   lo:true,  src:'Curiosity RAD 1.84 mSv/day · Zeitlin et al. Science 2013' },
+  { key:'missionDose',  label:'Mission Dose (round trip + surface)',  unit:'mSv',   lo:true,  src:'RAD cruise + surface 0.64 mSv/day (Hassler et al. 2014)' },
+  { key:'careerRadPct', label:'Career Rad. Limit Used (mission)',     unit:'%',     lo:true,  src:'NASA-STD-3001 · 600 mSv career limit' },
+  { key:'boneLossPct',  label:'Hip Bone Density Loss (outbound)',     unit:'%',     lo:true,  src:'0.43%/month with exercise (illustrative)' },
+  { key:'deltaV',       label:'Δv Required (burns)',                  unit:'km/s',  lo:true,  src:'TMI from 400 km LEO + Mars capture' },
+  { key:'abortDv',      label:'Spare Δv Capability',                  unit:'km/s',  lo:false, src:'Full-tank Δv − required Δv (rocket equation)' },
   { key:'propellant',   label:'Propellant Mass',                      unit:'kg',    lo:true,  src:'Tsiolkovsky rocket equation' },
-  { key:'cost',         label:'Mission Cost',                         unit:'$B',    lo:true,  src:'NASA IG 2022 (SLS $2.7B) · SpaceX 2023' },
-  { key:'launches',     label:'Launches Required',                    unit:'×',     lo:true,  src:'NASA DRA 5.0 architecture' },
-  { key:'payloadMars',  label:'Payload to Mars',                      unit:'kg',    lo:false, src:'Mass fraction from Tsiolkovsky' },
+  { key:'imleo',        label:'Mass in Low Earth Orbit',              unit:'t',     lo:true,  src:'Stage + crew payload + propellant' },
+  { key:'launches',     label:'Launches Required',                    unit:'×',     lo:true,  src:'Mass ÷ per-launch capacity' },
+  { key:'cost',         label:'Transportation Cost (est.)',           unit:'$B',    lo:true,  src:'Hardware + launches · estimates, see physics/README' },
+  { key:'success',      label:'Success Estimate (heuristic)',         unit:'%',     lo:false, src:'Product of per-event reliabilities — simplified' },
+  { key:'crewHealth',   label:'Crew Health Index (heuristic)',        unit:'%',     lo:false, src:'Illustrative: dose + zero-g time' },
   { key:'isp',          label:'Specific Impulse',                     unit:'s',     lo:false, src:'Engine test data / manufacturer spec' },
-  { key:'deltaV',       label:'Delta-V Budget (burn total)',          unit:'km/s',  lo:false, src:'Tsiolkovsky rocket equation — NOT cruise speed' },
 ];
 
 const PLAYER_COLORS = ['#E91E8C','#00BCD4','#9C27B0','#FF5722','#CDDC39','#FFD700'];
@@ -351,7 +302,7 @@ function BuilderPreview({ stats }) {
       </div>
     );
   }
-  const Row = ({ label, val, good, warn, src }) => (
+  const Row = ({ label, val, good, warn }) => (
     <div className="preview-row">
       <span className="preview-label">{label}</span>
       <span className="preview-val" style={{ color: warn ? '#f4ae2a' : good ? '#6edc52' : 'var(--text)' }}>{val}</span>
@@ -363,29 +314,33 @@ function BuilderPreview({ stats }) {
   );
   return (
     <div className="builder-preview">
-      <div className="preview-title">LIVE PHYSICS — TSIOLKOVSKY</div>
+      <div className="preview-title">LIVE PHYSICS — SAME MISSION AS THE FLEET</div>
 
-      {/* Physics chain — shows exactly how transit is computed */}
       <Sep label="ENGINE" />
       <Row label="ISP" val={`${stats.isp} s`} good={stats.isp > 700} warn={stats.isp < 400} />
       <Row label="Ve = ISP × 9.807" val={`${stats.exhaustVelocity} m/s`} good={stats.exhaustVelocity > 7000} />
 
       <Sep label="MASS (from your parts)" />
-      <Row label="Dry mass (hab+shield+tank)" val={`${(stats.dryMass/1000).toFixed(1)} t`} />
-      <Row label="Propellant (tank cap.)" val={`${(stats.propellant/1000).toFixed(0)} t`} />
+      <Row label="Structure (tank+shield+bus)" val={`${(stats.stageDryMass/1000).toFixed(1)} t`} />
+      <Row label="Habitat module" val={`${(stats.habitatMass/1000).toFixed(1)} t`} />
+      <Row label="Tank capacity" val={`${(stats.propellantCapacity/1000).toFixed(0)} t`} />
 
-      <Sep label="ΔV = Ve × ln(wet/dry)" />
-      <Row label="Delta-V computed" val={`${stats.deltaV} km/s`} good={stats.deltaV > 5} warn={stats.deltaV < MIN_MARS_DV} />
-      <Row label="Min. needed for Mars" val={`${MIN_MARS_DV} km/s`} />
+      {!stats.failed && (
+        <>
+          <Sep label="ΔV = Ve × ln(m₀/m_f)" />
+          <Row label="Δv required (TMI + capture)" val={`${stats.deltaV} km/s`} />
+          <Row label="Spare Δv (full tanks)" val={`${stats.abortDv} km/s`} good={stats.abortDv > 2} warn={stats.abortDv < 0.5} />
+          <Row label="Propellant used" val={`${(stats.propellant/1000).toFixed(0)} t`} />
 
-      <Sep label="TRANSIT = f(ΔV) — NASA DRA 5.0 calibrated" />
-      <Row label="Transit time" val={`${stats.transit} days`} good={stats.transit < 150} warn={stats.transit > 270} />
+          <Sep label="TRAJECTORY (patched conics)" />
+          <Row label="Transit time" val={`${stats.transit} days`} good={stats.transit < 150} warn={stats.transit > 270} />
 
-      <Sep label="REAL HEALTH METRICS" />
-      <Row label="Radiation (1.3 mSv/d × days)" val={`${stats.radiation} mSv`} good={stats.radiation < 200} warn={stats.radiation > 400} />
-      <Row label="Career limit used (÷600 mSv)" val={`${stats.careerRadPct}%`} good={stats.careerRadPct < 30} warn={stats.careerRadPct > 55} />
-      <Row label="Bone loss (0.43%/mo, Leblanc)" val={`${stats.boneLossPct}%`} good={stats.boneLossPct < 2} warn={stats.boneLossPct > 4} />
-      <Row label="Abort ΔV reserve" val={`${stats.abortDv} km/s`} good={stats.abortDv > 2} warn={stats.abortDv < 0.5} />
+          <Sep label="CREW" />
+          <Row label="Transit dose (1.84 mSv/d)" val={`${stats.radiation} mSv`} good={stats.radiation < 200} warn={stats.radiation > 400} />
+          <Row label="Mission dose / 600 mSv limit" val={`${stats.careerRadPct}%`} good={stats.careerRadPct < 100} warn={stats.careerRadPct > 150} />
+          <Row label="Bone loss (outbound)" val={`${stats.boneLossPct}%`} good={stats.boneLossPct < 2} warn={stats.boneLossPct > 4} />
+        </>
+      )}
 
       {stats.failed && (
         <div className="preview-warn">⚠ MISSION FAIL: {stats.failReason}</div>
@@ -441,7 +396,7 @@ function CockpitView({ rocket, rocketRp, distance, hazardsHit }) {
       impactTimerRef.current = setTimeout(() => setImpactAnim(null), 2200);
     }
     prevHazRef.current = hazardsHit.length;
-  }, [hazardsHit.length]);
+  }, [hazardsHit]); // body only acts when the hazard count grows, so re-running is harmless
 
   const isSolar    = impactAnim?.type === 'solar_flare';
   const isDebris   = impactAnim?.type === 'micrometeorite' || impactAnim?.type === 'debris';
@@ -723,95 +678,90 @@ function CockpitView({ rocket, rocketRp, distance, hazardsHit }) {
 }
 
 /* ══════════════════════════════════════════════════════════
-   NTR ADVANTAGE PANEL — live comparison, updates with mission params
+   TRADE-OFF PANEL — generated from engine results, no built-in winner
    ══════════════════════════════════════════════════════════ */
-function NTRAdvantage({ rockets }) {
-  const ntr  = rockets.nuclear;
-  const chem = rockets.chemical;
-  const shp  = rockets.starship;
-  if (!ntr || !chem || !shp) return null;
+const fmtTradeoff = (key, v) => {
+  switch (key) {
+    case 'transitTime':      return `${toDays(v).toFixed(0)} d`;
+    case 'missionDose':      return `${toMilliSieverts(v).toFixed(0)} mSv`;
+    case 'initialMassInLEO': return `${toTonnes(v).toFixed(0)} t`;
+    case 'launches':         return `${v}×`;
+    case 'cost':             return `$${toBillionUsd(v).toFixed(2)}B`;
+    case 'success':          return `${(v * 100).toFixed(1)}%`;
+    case 'deltaVReserve':    return `${toKmPerSecond(v).toFixed(2)} km/s`;
+    default:                 return String(v);
+  }
+};
 
-  const transitRatio = (chem.transit / ntr.transit).toFixed(1);
-  const radLess      = Math.round((1 - ntr.radiation / chem.radiation) * 100);
-  const propLess     = Math.round((1 - ntr.propellant / chem.propellant) * 100);
+/** Missions keyed by id for the fleet rockets that are feasible. */
+const fleetMissions = (rockets) => Object.fromEntries(
+  VEHICLE_IDS.filter(id => rockets[id] && !rockets[id].failed).map(id => [id, rockets[id].mission]),
+);
+
+/** One-line, neutral explanation of each "best" result. */
+function TradeoffList({ rockets }) {
+  const summary = summarizeTradeoffs(fleetMissions(rockets));
+  if (summary.length === 0) return null;
+  return (
+    <ul style={{paddingLeft:'18px', lineHeight:'2', fontSize:'0.8rem', color:'var(--text)', margin:0}}>
+      {summary.map(s => {
+        const best = rockets[s.bestId];
+        return (
+          <li key={s.key}>
+            <strong style={{color:best.color}}>{best.label}</strong>{' '}
+            {s.tie ? 'ties for best' : 'is best'} on {s.label}: {fmtTradeoff(s.key, s.bestValue)}
+            {s.runnerUpId && !s.tie && (
+              <span style={{color:'#888'}}> (next: {rockets[s.runnerUpId].label}, {fmtTradeoff(s.key, s.runnerUpValue)})</span>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function TradeoffPanel({ rockets }) {
+  const fleet = VEHICLE_IDS.map(id => rockets[id]).filter(Boolean);
+  const flying = fleet.filter(r => !r.failed);
+  if (flying.length === 0) return null;
 
   const barMetrics = [
-    {
-      label: 'TRANSIT TIME',
-      lo: true,
-      rows: [
-        { name:'NTR',  val:ntr.transit,                    color:'#3B8BD4' },
-        { name:'CHEM', val:chem.transit,                   color:'#E24B4A' },
-        { name:'SHP',  val:shp.transit,                    color:'#1D9E75' },
-      ],
-      unit: 'd',
-    },
-    {
-      label: 'RADIATION DOSE',
-      lo: true,
-      rows: [
-        { name:'NTR',  val:ntr.radiation,                  color:'#3B8BD4' },
-        { name:'CHEM', val:chem.radiation,                 color:'#E24B4A' },
-        { name:'SHP',  val:shp.radiation,                  color:'#1D9E75' },
-      ],
-      unit: 'mSv',
-    },
-    {
-      label: 'PROPELLANT MASS',
-      lo: true,
-      rows: [
-        { name:'NTR',  val:Math.round(ntr.propellant/1000),  color:'#3B8BD4' },
-        { name:'CHEM', val:Math.round(chem.propellant/1000), color:'#E24B4A' },
-        { name:'SHP',  val:Math.round(shp.propellant/1000),  color:'#1D9E75' },
-      ],
-      unit: 't',
-    },
+    { label:'TRANSIT TIME',               key:'transit',     unit:'d',   lo:true },
+    { label:'MISSION DOSE (ROUND TRIP)',  key:'missionDose', unit:'mSv', lo:true },
+    { label:'MASS IN LOW EARTH ORBIT',    key:'imleo',       unit:'t',   lo:true },
+    { label:'TRANSPORTATION COST (EST.)', key:'cost',        unit:'$B',  lo:true },
   ];
 
   return (
     <div className="ntr-advantage">
       <div className="ntr-adv-header">
-        <span className="ntr-adv-icon">⚛</span>
+        <span className="ntr-adv-icon">⚖</span>
         <div>
-          <div className="ntr-adv-title">WHY NUCLEAR THERMAL DOMINATES MARS TRANSIT</div>
+          <div className="ntr-adv-title">TRADE-OFFS — SAME MISSION, PHYSICS DECIDES</div>
           <div className="ntr-adv-formula">
-            ΔV = Ve × ln(m₀/mf) · Ve = ISP × g₀ · NTR ISP 900s = 2× Chemical 450s → Ve 2× → 4× less propellant for same ΔV
+            Δv = Ve × ln(m₀/m_f) · Ve = ISP × g₀ · patched conics: LEO departure → heliocentric transfer → Mars capture
           </div>
         </div>
       </div>
 
-      <div className="ntr-adv-keypoints">
-        <div className="ntr-adv-kp">
-          <span className="ntr-adv-kp-num" style={{color:'#3B8BD4'}}>{transitRatio}×</span>
-          <span className="ntr-adv-kp-label">FASTER THAN CHEMICAL<br/>{ntr.transit}d vs {chem.transit}d</span>
-        </div>
-        <div className="ntr-adv-kp">
-          <span className="ntr-adv-kp-num" style={{color:'#6edc52'}}>{radLess}%</span>
-          <span className="ntr-adv-kp-label">LESS RADIATION<br/>shorter transit = less GCR exposure</span>
-        </div>
-        <div className="ntr-adv-kp">
-          <span className="ntr-adv-kp-num" style={{color:'#6edc52'}}>{propLess}%</span>
-          <span className="ntr-adv-kp-label">LESS PROPELLANT<br/>{Math.round(ntr.propellant/1000)}t vs {Math.round(chem.propellant/1000)}t</span>
-        </div>
-      </div>
-
       {barMetrics.map(m => {
-        const maxV = Math.max(...m.rows.map(r => r.val));
-        const bestV = m.lo ? Math.min(...m.rows.map(r => r.val)) : Math.max(...m.rows.map(r => r.val));
+        const vals = flying.map(r => r[m.key]);
+        const maxV = Math.max(...vals) || 1;
+        const bestV = m.lo ? Math.min(...vals) : Math.max(...vals);
         return (
-          <div key={m.label} className="ntr-adv-metric">
+          <div key={m.key} className="ntr-adv-metric">
             <div className="ntr-adv-metric-label">{m.label}</div>
-            {m.rows.map(r => {
-              const isBest = r.val === bestV;
+            {fleet.map(r => {
+              const isBest = !r.failed && r[m.key] === bestV;
               return (
-                <div key={r.name} className="ntr-adv-bar-row">
-                  <span className="ntr-adv-bar-name" style={{color:r.color}}>{r.name}</span>
+                <div key={r.shortLabel} className="ntr-adv-bar-row">
+                  <span className="ntr-adv-bar-name" style={{color:r.color}}>{r.shortLabel}</span>
                   <div className="ntr-adv-bar-track">
                     <div className="ntr-adv-bar-fill"
-                      style={{width:`${(r.val/maxV)*100}%`, background:r.color, opacity:isBest?1:0.3}}/>
+                      style={{width: r.failed ? '0%' : `${(r[m.key]/maxV)*100}%`, background:r.color, opacity:isBest?1:0.35}}/>
                   </div>
-                  <span className="ntr-adv-bar-val" style={{color:isBest?r.color:'#555'}}>
-                    {r.val >= 1000 ? `${r.val.toFixed(0)} ${m.unit}` : `${r.val.toFixed(1)} ${m.unit}`}{isBest?' ★':''}
+                  <span className="ntr-adv-bar-val" style={{color:isBest?r.color:'#777'}}>
+                    {r.failed ? 'cannot fly' : `${r[m.key]} ${m.unit}`}{isBest?' ★':''}
                   </span>
                 </div>
               );
@@ -821,13 +771,17 @@ function NTRAdvantage({ rockets }) {
       })}
 
       <div className="ntr-adv-insight">
-        <strong style={{color:'#3B8BD4'}}>Physics derivation:</strong> NERVA XE Prime achieved ISP 841s in 1969 (Los Alamos).
-        Modern Bimodal NTR design target: 900s (Borowski et al. AIAA-2012-5144).
-        At ISP 900s → Ve = 900 × 9.807 = 8,829 m/s. Chemical J-2X: 450s → Ve = 4,414 m/s.
-        Same ΔV = Ve × ln(m₀/mf) → NTR achieves 7.2 km/s with 79t propellant vs Chemical 4.5 km/s with 311t.
-        Higher ΔV → faster transfer orbit → <strong style={{color:'#3B8BD4'}}>{ntr.transit}d transit</strong>.
-        Shorter transit → <strong style={{color:'#6edc52'}}>less GCR radiation exposure</strong> (1.3 mSv/day, Curiosity RAD — Zeitlin et al. Science 2013).
-        Only 1 launch required vs {chem.launches}× SLS at $2.7B each (NASA IG 2022).
+        <TradeoffList rockets={rockets} />
+        <div style={{marginTop:'10px'}}>
+          <strong>Why they differ:</strong> higher ISP gives more Δv per tonne of propellant, which can buy a faster
+          transfer, but NTR reactors and bulky hydrogen tanks add dry mass. Starship's lower ISP is offset by refilling
+          very large tanks in orbit with tanker flights, and it brakes with its heat shield instead of an engine burn.
+          The heat shield, though, caps how fast it can arrive. Faster trips cut cruise radiation, but usually mean a longer
+          wait on Mars for the return window, so total mission dose falls less than transit dose.
+          {fleet.some(r => r.failed) && (
+            <span style={{color:'#ff8080'}}> {fleet.filter(r => r.failed).map(r => `${r.label}: ${r.failReason}.`).join(' ')}</span>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -838,7 +792,8 @@ function NTRAdvantage({ rockets }) {
    ══════════════════════════════════════════════════════════ */
 export default function App() {
   const [crewSize,  setCrewSize]  = useState(4);
-  const [year,      setYear]      = useState(2027);
+  const [windowIndex, setWindowIndex] = useState(0); // 0 = next launch window
+  const [transferId,  setTransferId]  = useState('fastest');
   const [risk,      setRisk]      = useState(5);
   const [launched,  setLaunched]  = useState(false);
   const [countdown, setCountdown] = useState(null);
@@ -871,9 +826,6 @@ export default function App() {
   // Race view
   const [raceView,     setRaceView]     = useState('race');
   const [cockpitKey,   setCockpitKey]   = useState(null);
-
-  // Per-race transit variance — different every launch (±12% from launch window / trajectory optim.)
-  const [raceVariance, setRaceVariance] = useState({});
 
   // Hazards
   const [appliedHazards,    setAppliedHazards]    = useState({});
@@ -909,41 +861,31 @@ export default function App() {
 
   // Clear every pending race/countdown timer on unmount.
   useEffect(() => () => clearAllRaceTimers(), []);
-  const distance = DISTANCES[year];
+  const window_ = LAUNCH_WINDOWS[windowIndex] ?? LAUNCH_WINDOWS[0];
+  const year = window_.year;
+  const transferOption = TRANSFER_OPTIONS.find(o => o.id === transferId) ?? TRANSFER_OPTIONS[0];
+  const missionParams = useMemo(() => ({
+    crewSize, risk, window: window_, transferChoice: transferOption.choice,
+  }), [crewSize, risk, window_, transferOption]);
 
-  /* ── All rockets (base + optional player), scaled for current params ── */
+  /* ── All rockets (fleet + optional player), simulated by the physics engine ── */
   const rockets = useMemo(() => {
-    const out = {};
-    Object.entries(BASE_ROCKETS).forEach(([k, base]) => {
-      out[k] = scaleRocket(base, crewSize, distance);
-    });
+    const out = simulateFleet(missionParams);
     if (playerRocket) {
-      out.player = scaleRocket(playerRocket, crewSize, distance, risk);
+      const player = computePlayerStats(playerRocket.parts, missionParams);
+      if (player) out.player = player;
     }
     return out;
-  }, [crewSize, distance, risk, playerRocket]);
+  }, [missionParams, playerRocket]);
 
-  /* ── racedRockets: base rockets with per-race transit variance applied ── */
-  const racedRockets = useMemo(() => {
-    if (!launched || Object.keys(raceVariance).length === 0) return rockets;
-    const out = {};
-    Object.entries(rockets).forEach(([k, r]) => {
-      const v = raceVariance[k] ?? 1.0;
-      if (r.failed || v === 1.0) { out[k] = r; return; }
-      const vTransit = +(r.transit * v).toFixed(1);
-      const vRad     = +(r.radiation * v).toFixed(1);
-      const boneRate = r.habName === 'Centrifuge Hab' ? BONE_RATE_CENTRIFUGE : BONE_RATE;
-      out[k] = {
-        ...r,
-        transit:      vTransit,
-        radiation:    vRad,
-        careerRadPct: +(vRad / CAREER_RAD_LIMIT * 100).toFixed(1),
-        boneLossPct:  +(vTransit / 30 * boneRate).toFixed(1),
-        avgVelocity:  +(distance * 1e6 / (vTransit * 86400)).toFixed(2),
-      };
-    });
-    return out;
-  }, [rockets, raceVariance, launched, distance]);
+  // The race replays the engine's deterministic results (no random transit variance).
+  const racedRockets = rockets;
+
+  // Track length for race labels: the longest flown transfer arc (M km).
+  const distance = useMemo(() => {
+    const paths = Object.values(rockets).filter(r => !r.failed).map(r => r.pathMkm);
+    return paths.length > 0 ? Math.max(...paths) : 0;
+  }, [rockets]);
 
   /* ── Max transit excludes failed rockets ── */
   const maxTransit = useMemo(() => {
@@ -1158,13 +1100,6 @@ export default function App() {
     setActiveHazardAlert(null);
     setRaceView('race');
 
-    // Generate per-race transit variance: ±12% from launch window timing / trajectory optimisation
-    const variance = {};
-    Object.entries(rockets).forEach(([key, rocket]) => {
-      variance[key] = rocket.failed ? 1.0 : +(0.88 + Math.random() * 0.24).toFixed(3);
-    });
-    setRaceVariance(variance);
-
     // Generate random hazards per rocket
     const haz = {};
     Object.entries(rockets).forEach(([key, rocket]) => {
@@ -1199,8 +1134,8 @@ export default function App() {
     });
     raceHazardsRef.current = haz;
 
-    // Default cockpit to player, else NTR
-    setCockpitKey(rockets.player ? 'player' : 'nuclear');
+    // Default cockpit to the player's rocket, else the first fleet vehicle that can fly
+    setCockpitKey(rockets.player ? 'player' : (VEHICLE_IDS.find(id => !rockets[id].failed) ?? VEHICLE_IDS[0]));
 
     setLaunched(true);
     // Each launch gets an id; if NEW MISSION is pressed (or another launch starts)
@@ -1234,19 +1169,18 @@ export default function App() {
     setRaceProgress(0);    setRaceRunning(false);
     setCountdown(null);    setAppliedHazards({});
     setActiveHazardAlert(null); setDodgeOffsets({}); setImpactEvents([]);
-    setRaceVariance({});
   };
 
   /* ── Save player rocket ── */
   const savePlayerRocket = () => {
-    const stats = computePlayerStats(builderParts);
+    const stats = computePlayerStats(builderParts, missionParams);
     if (!stats) return;
-    setPlayerRocket(stats);
+    setPlayerRocket(stats); // rockets.player is re-simulated from stats.parts when parameters change
     setShowBuilder(false);
   };
 
   /* ── Builder live preview ── */
-  const builderPreviewStats = useMemo(() => computePlayerStats(builderParts), [builderParts]);
+  const builderPreviewStats = useMemo(() => computePlayerStats(builderParts, missionParams), [builderParts, missionParams]);
 
   /* ── Race SVG layout ── */
   const rocketEntries = Object.entries(racedRockets);
@@ -1398,68 +1332,87 @@ export default function App() {
 
             <div className="controls-grid">
               <div className="control">
-                <label className="control-label">CREW SIZE</label>
+                <label className="control-label" htmlFor="crew-size">CREW SIZE</label>
                 <div className="control-row">
-                  <input type="range" min="2" max="8" value={crewSize} onChange={e => setCrewSize(+e.target.value)} />
+                  <input id="crew-size" type="range" min="2" max="8" value={crewSize} onChange={e => setCrewSize(+e.target.value)} />
                   <span className="control-value">{crewSize}</span>
                 </div>
-                <span className="control-hint">{crewSize} crew · {(crewSize*1000+2000).toLocaleString()} kg estimated habitat mass</span>
+                <span className="control-hint">
+                  {crewSize} crew · {((CREW_PAYLOAD.habitatBaseMass + CREW_PAYLOAD.habitatMassPerCrew * crewSize) / 1000).toFixed(1)} t habitat · {CREW_PAYLOAD.consumablesPerCrewDay} kg consumables per crew-day
+                </span>
               </div>
               <div className="control">
-                <label className="control-label">LAUNCH WINDOW</label>
-                <select value={year} onChange={e => setYear(+e.target.value)}>
-                  {Object.entries(DISTANCES).map(([y,d]) => (
-                    <option key={y} value={+y}>{y} — {d} M km (JPL Horizons)</option>
+                <label className="control-label" htmlFor="launch-window">LAUNCH WINDOW</label>
+                <select id="launch-window" value={windowIndex} onChange={e => setWindowIndex(+e.target.value)}>
+                  {LAUNCH_WINDOWS.map((w, i) => (
+                    <option key={w.departureDate.toISOString()} value={i}>
+                      {w.year} — departs ~{fmtDate(w.departureDate)} · min-energy {Math.round(toDays(w.timeOfFlight))} d{i === 0 ? ' (next)' : ''}
+                    </option>
                   ))}
                 </select>
-                <span className="control-hint">Earth–Mars distance: {distance} M km · {year} opposition</span>
+                <span className="control-hint">Windows repeat every ~26 months. Mars' eccentric orbit makes some windows faster or cheaper than others.</span>
               </div>
               <div className="control">
-                <label className="control-label">RISK TOLERANCE</label>
+                <label className="control-label" htmlFor="transfer-strategy">TRANSFER STRATEGY</label>
+                <select id="transfer-strategy" value={transferId} onChange={e => setTransferId(e.target.value)}>
+                  {TRANSFER_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+                </select>
+                <span className="control-hint">{transferOption.hint}</span>
+              </div>
+              <div className="control">
+                <label className="control-label" htmlFor="risk-tolerance">RISK TOLERANCE</label>
                 <div className="control-row">
-                  <input type="range" min="1" max="10" value={risk} onChange={e => setRisk(+e.target.value)} />
+                  <input id="risk-tolerance" type="range" min="1" max="10" value={risk} onChange={e => setRisk(+e.target.value)} />
                   <span className="control-value">{risk}</span>
                 </div>
-                <span className="control-hint">{risk<=3?'Conservative (full abort margins)':risk<=6?'Balanced NASA approach':'Aggressive — reduced margins'}</span>
+                <span className="control-hint">
+                  {risk<=3?'Conservative':risk<=6?'Balanced':'Aggressive'} · {(deltaVMargin(risk)*100).toFixed(0)}% Δv reserve held back
+                </span>
               </div>
             </div>
 
             {/* FLEET REFERENCE CARDS */}
             <div className="selector-title" style={{margin:'20px 0 12px'}}>
-              ■ COMPETING FLEET — Fixed reference rockets (affects all stats when parameters change)
+              ■ COMPETING FLEET — all three fly the same mission; every number below is computed by the physics engine
             </div>
             <div className="rocket-cards">
-              {Object.entries(BASE_ROCKETS).map(([key, base]) => {
-                const scaled = rockets[key];
+              {VEHICLE_IDS.map((key) => {
+                const r = rockets[key];
                 return (
-                  <div key={key} className="rocket-card" style={{borderColor: base.color}}>
+                  <div key={key} className="rocket-card" style={{borderColor: r.color}}>
                     <div className="rocket-card-header"
-                      style={{background:`linear-gradient(135deg,${base.color}20,${base.color}08)`, borderBottom:`1px solid ${base.color}40`}}>
+                      style={{background:`linear-gradient(135deg,${r.color}20,${r.color}08)`, borderBottom:`1px solid ${r.color}40`}}>
                       <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start'}}>
                         <div>
-                          <h3 style={{color:base.color, fontFamily:'Orbitron', fontSize:'0.9rem', margin:0}}>{base.label}</h3>
-                          <div style={{fontSize:'0.6rem', color:'#777', marginTop:'3px'}}>{base.engineType}</div>
+                          <h3 style={{color:r.color, fontFamily:'Orbitron', fontSize:'0.9rem', margin:0}}>{r.label}</h3>
+                          <div style={{fontSize:'0.6rem', color:'#777', marginTop:'3px'}}>{r.engineType}</div>
                         </div>
                         <span style={{fontSize:'0.58rem', color:'#555', background:'rgba(0,0,0,0.5)', padding:'2px 7px', borderRadius:'3px'}}>
-                          TRL {base.trl}
+                          TRL {r.trl}
                         </span>
                       </div>
                     </div>
                     <div className="rocket-card-body">
-                      <div className="card-stats-grid">
-                        <div className="csg-item"><span className="csg-l">ISP</span><span className="csg-v" style={{color:base.color}}>{scaled.isp}s</span></div>
-                        <div className="csg-item"><span className="csg-l">TRANSIT</span><span className="csg-v" style={{color:base.color}}>{scaled.transit}d</span></div>
-                        <div className="csg-item"><span className="csg-l">CRUISE SPEED</span><span className="csg-v" style={{color:base.color}}>{scaled.avgVelocity} km/s</span></div>
-                        <div className="csg-item"><span className="csg-l">RADIATION</span><span className="csg-v" style={{color:radColor(scaled.radiation)}}>{scaled.radiation} mSv</span></div>
-                        <div className="csg-item"><span className="csg-l">COST</span><span className="csg-v" style={{color:base.color}}>${scaled.cost}B</span></div>
-                        <div className="csg-item"><span className="csg-l">LAUNCHES</span><span className="csg-v" style={{color:base.color}}>{scaled.launches}×</span></div>
-                        <div className="csg-item"><span className="csg-l">ABORT ΔV</span><span className="csg-v" style={{color:scaled.abortDv>2?'#6edc52':scaled.abortDv<0.5?'#ff5555':base.color}}>{scaled.abortDv} km/s</span></div>
-                        <div className="csg-item"><span className="csg-l">PAYLOAD</span><span className="csg-v" style={{color:base.color}}>{(scaled.payloadMars/1000).toFixed(0)}t</span></div>
-                        <div className="csg-item"><span className="csg-l">CAREER RAD%</span><span className="csg-v" style={{color:radColor(scaled.radiation)}}>{scaled.careerRadPct}%</span></div>
-                        <div className="csg-item"><span className="csg-l">BONE LOSS</span><span className="csg-v" style={{color:scaled.boneLossPct>3.5?'#ff5555':scaled.boneLossPct<2?'#6edc52':base.color}}>{scaled.boneLossPct}%</span></div>
-                      </div>
+                      {r.failed ? (
+                        <div style={{fontSize:'0.66rem', color:'#ff8080', lineHeight:1.6}}>
+                          ⚠ CANNOT FLY THIS MISSION: {r.failReason}
+                        </div>
+                      ) : (
+                        <div className="card-stats-grid">
+                          <div className="csg-item"><span className="csg-l">ISP</span><span className="csg-v" style={{color:r.color}}>{r.isp}s</span></div>
+                          <div className="csg-item"><span className="csg-l">TRANSIT</span><span className="csg-v" style={{color:r.color}}>{r.transit}d</span></div>
+                          <div className="csg-item"><span className="csg-l">Δv REQUIRED</span><span className="csg-v" style={{color:r.color}}>{r.deltaV} km/s</span></div>
+                          <div className="csg-item"><span className="csg-l">TRANSIT DOSE</span><span className="csg-v" style={{color:radColor(r.radiation)}}>{r.radiation} mSv</span></div>
+                          <div className="csg-item"><span className="csg-l">COST (EST.)</span><span className="csg-v" style={{color:r.color}}>${r.cost}B</span></div>
+                          <div className="csg-item"><span className="csg-l">LAUNCHES</span><span className="csg-v" style={{color:r.color}}>{r.launches}×</span></div>
+                          <div className="csg-item"><span className="csg-l">SPARE ΔV</span><span className="csg-v" style={{color:r.abortDv>2?'#6edc52':r.abortDv<0.5?'#ff5555':r.color}}>{r.abortDv} km/s</span></div>
+                          <div className="csg-item"><span className="csg-l">MASS IN LEO</span><span className="csg-v" style={{color:r.color}}>{r.imleo}t</span></div>
+                          <div className="csg-item"><span className="csg-l">MISSION DOSE</span><span className="csg-v" style={{color:r.careerRadPct > 100 ? '#ff5555' : '#f4ae2a'}}>{r.careerRadPct}% of limit</span></div>
+                          <div className="csg-item"><span className="csg-l">SUCCESS (HEUR.)</span><span className="csg-v" style={{color:r.color}}>{r.success}%</span></div>
+                        </div>
+                      )}
                       <div style={{fontSize:'0.52rem', color:'#4a2515', marginTop:'8px', lineHeight:'1.5', fontFamily:'Share Tech Mono'}}>
-                        {base.source}
+                        {r.source}
                       </div>
                     </div>
                   </div>
@@ -1467,12 +1420,12 @@ export default function App() {
               })}
             </div>
 
-            {/* NTR ADVANTAGE PANEL */}
-            <NTRAdvantage rockets={rockets} />
+            {/* TRADE-OFF PANEL */}
+            <TradeoffPanel rockets={rockets} />
 
             {/* PLAYER ROCKET */}
             <div className="selector-title" style={{margin:'24px 0 12px'}}>
-              ■ YOUR NUCLEAR ROCKET — Choose a real NTR engine + components. Stats computed from Tsiolkovsky equation. Can fail or explode.
+              ■ YOUR ROCKET — Choose a real engine + components. It flies the same mission as the fleet, through the same physics engine. It can fail.
             </div>
             <div className="player-rocket-section">
               {playerRocket ? (
@@ -1484,7 +1437,7 @@ export default function App() {
                         {playerRocket.engineType} · TRL {playerRocket.trl}
                       </div>
                     </div>
-                    {playerRocket.failed && (
+                    {(rockets.player || playerRocket).failed && (
                       <span style={{fontSize:'0.62rem', color:'#ff5555', border:'1px solid #ff5555', padding:'3px 8px', borderRadius:'4px', fontFamily:'Orbitron'}}>
                         ⚠ WILL FAIL
                       </span>
@@ -1496,11 +1449,11 @@ export default function App() {
                       return (
                         <>
                           <div className="csg-item"><span className="csg-l">ISP</span><span className="csg-v" style={{color:playerRocket.color}}>{sc.isp}s</span></div>
-                          <div className="csg-item"><span className="csg-l">TRANSIT</span><span className="csg-v" style={{color:playerRocket.failed?'#ff5555':playerRocket.color}}>{playerRocket.failed?'FAIL':`${sc.transit}d`}</span></div>
-                          <div className="csg-item"><span className="csg-l">Δ-V</span><span className="csg-v" style={{color:playerRocket.failed?'#ff5555':playerRocket.color}}>{sc.deltaV} km/s</span></div>
-                          <div className="csg-item"><span className="csg-l">RADIATION</span><span className="csg-v" style={{color:playerRocket.failed?'#ff5555':radColor(sc.radiation)}}>{playerRocket.failed?'—':`${sc.radiation} mSv`}</span></div>
-                          <div className="csg-item"><span className="csg-l">ABORT ΔV</span><span className="csg-v" style={{color:playerRocket.failed?'#ff5555':sc.abortDv>2?'#6edc52':'#f4ae2a'}}>{playerRocket.failed?'—':`${sc.abortDv} km/s`}</span></div>
-                          <div className="csg-item"><span className="csg-l">BONE LOSS</span><span className="csg-v" style={{color:playerRocket.color}}>{playerRocket.failed?'—':`${sc.boneLossPct}%`}</span></div>
+                          <div className="csg-item"><span className="csg-l">TRANSIT</span><span className="csg-v" style={{color:sc.failed?'#ff5555':playerRocket.color}}>{sc.failed?'FAIL':`${sc.transit}d`}</span></div>
+                          <div className="csg-item"><span className="csg-l">Δv REQUIRED</span><span className="csg-v" style={{color:sc.failed?'#ff5555':playerRocket.color}}>{sc.deltaV} km/s</span></div>
+                          <div className="csg-item"><span className="csg-l">TRANSIT DOSE</span><span className="csg-v" style={{color:sc.failed?'#ff5555':radColor(sc.radiation)}}>{sc.failed?'—':`${sc.radiation} mSv`}</span></div>
+                          <div className="csg-item"><span className="csg-l">SPARE ΔV</span><span className="csg-v" style={{color:sc.failed?'#ff5555':sc.abortDv>2?'#6edc52':'#f4ae2a'}}>{sc.failed?'—':`${sc.abortDv} km/s`}</span></div>
+                          <div className="csg-item"><span className="csg-l">BONE LOSS</span><span className="csg-v" style={{color:playerRocket.color}}>{sc.failed?'—':`${sc.boneLossPct}%`}</span></div>
                           <div className="csg-item"><span className="csg-l">ENGINE</span><span className="csg-v" style={{color:playerRocket.color, fontSize:'0.62rem'}}>{playerRocket.engineName}</span></div>
                           <div className="csg-item"><span className="csg-l">HAB</span><span className="csg-v" style={{color:playerRocket.color, fontSize:'0.62rem'}}>{playerRocket.habName}</span></div>
                         </>
@@ -1541,7 +1494,7 @@ export default function App() {
         {showBuilder && (
           <div className="modal-overlay" onClick={() => setShowBuilder(false)}>
             <div className="modal" style={{maxWidth:'900px', width:'96vw'}} onClick={e => e.stopPropagation()}>
-              <h2>Build Your Nuclear Rocket — Real NTR Components</h2>
+              <h2>Build Your Rocket — Real Engines &amp; Components</h2>
 
               {/* Name + Color row */}
               <div style={{display:'grid', gridTemplateColumns:'1fr auto', gap:'16px', marginBottom:'20px', alignItems:'end'}}>
@@ -1590,13 +1543,13 @@ export default function App() {
                         padding:'8px 12px', background:'rgba(59,139,212,0.07)',
                         border:'1px solid rgba(59,139,212,0.25)', borderRadius:'5px'
                       }}>
-                        <strong style={{color:'#3B8BD4'}}>NTR engines only.</strong> ISP 841–900s = 2× chemical →
-                        exhaust velocity 2× higher → 4× less propellant for same ΔV (Tsiolkovsky 1903).
-                        Your custom rocket is nuclear. Choose which nuclear engine to fly.
-                        Lower TRL = less proven = higher chance of engine anomaly during transit.
+                        <strong style={{color:'#3B8BD4'}}>Pick any engine.</strong> Higher ISP → higher exhaust velocity →
+                        more Δv per tonne of propellant (Δv = Ve·ln(m₀/m_f)), but heavier engines and tanks eat into that gain.
+                        Lower TRL = less proven = lower reliability in the success estimate.
+                        Electric engines have high ISP but far too little thrust for the impulsive burns this model assumes.
                       </div>
                       <div className="part-cards-grid">
-                        {ENGINE_CATALOG.filter(e => e.family.startsWith('NTR')).map(eng => (
+                        {ENGINE_CATALOG.map(eng => (
                           <div key={eng.id}
                             className={`part-card ${builderParts.engine===eng.id?'selected':''} ${eng.electric?'electric-card':''}`}
                             onClick={() => setBuilderParts({...builderParts, engine:eng.id})}>
@@ -1654,7 +1607,7 @@ export default function App() {
                   {builderSection === 'shield' && (
                     <div>
                       <div style={{fontSize:'0.6rem', color:'#6a3020', marginBottom:'8px', fontFamily:'Share Tech Mono'}}>
-                        GCR dose rate: 1.3 mSv/day (Curiosity RAD, Zeitlin et al. 2013). NASA career limit: 1,000 mSv (STD-3001 Vol.1).
+                        GCR dose rate: 1.84 mSv/day in cruise (Curiosity RAD, Zeitlin et al. 2013). NASA career limit: 600 mSv (NASA-STD-3001).
                       </div>
                       <div className="part-cards-grid" style={{gridTemplateColumns:'repeat(auto-fill, minmax(190px, 1fr))'}}>
                         {SHIELD_OPTIONS.map(sh => (
@@ -2178,7 +2131,7 @@ export default function App() {
                             {/* Speed bar relative to fastest */}
                             <rect x="-18" y="17" width="60" height="3" fill="rgba(255,255,255,0.08)" rx="1.5"/>
                             <rect x="-18" y="17"
-                              width={60 * (rocket.avgVelocity / 12)}
+                              width={60 * Math.min(1, rocket.avgVelocity / 40)}
                               height="3" fill={rocket.color} rx="1.5" opacity="0.7"/>
                           </>
                         )}
@@ -2295,7 +2248,7 @@ export default function App() {
                   ))}
                   <div style={{marginLeft:'auto', textAlign:'right'}}>
                     <div style={{fontFamily:'Share Tech Mono', fontSize:'0.75rem', color:'#e07030'}}>
-                      {distance} M km · {Math.round(raceProgress*100)}% · T+{Math.round(raceProgress*RACE_MS/1000)}s
+                      up to {distance} M km flown · {Math.round(raceProgress*100)}% · T+{Math.round(raceProgress*RACE_MS/1000)}s
                     </div>
                     <div style={{fontFamily:'Share Tech Mono', fontSize:'0.58rem', color:'#886644'}}>
                       NASA NSSDC · ESA · JPL CNEOS
@@ -2322,7 +2275,7 @@ export default function App() {
                   <CockpitView
                     rocket={rockets[cockpitKey]}
                     rocketRp={rocketProgresses[cockpitKey] || 0}
-                    distance={distance}
+                    distance={rockets[cockpitKey].pathMkm}
                     hazardsHit={appliedHazards[cockpitKey] || []}
                   />
                 )}
@@ -2337,7 +2290,7 @@ export default function App() {
                 const arrived  = arrivals[key];
                 const exploding = isFailed && raceProgress > 0.1;
                 const day      = Math.round(rp * rocket.transit);
-                const liveDist = +(distance * rp).toFixed(1);
+                const liveDist = +(rocket.pathMkm * rp).toFixed(1);
                 const hits     = appliedHazards[key] || [];
                 const radMult  = hits.reduce((m,h) => m*(h.radMultiplier||1), 1);
                 const liveRad  = +(rocket.radiation * rp * radMult).toFixed(1);
@@ -2362,9 +2315,6 @@ export default function App() {
                           💥 MISSION ABORT
                         </div>
                         <div style={{fontSize:'0.66rem', color:'#cc4444', lineHeight:1.6}}>{rocket.failReason}</div>
-                        <div style={{fontSize:'0.58rem', color:'#7a3030', marginTop:'6px'}}>
-                          ΔV = {rocket.deltaV} km/s · Min required: 3.5 km/s
-                        </div>
                       </div>
                     ) : (
                       <>
@@ -2374,7 +2324,7 @@ export default function App() {
                           <span className="td-label">PROGRESS</span>
                           <span className="td-value">{Math.round(rp*100)}%</span>
                           <span className="td-label">DISTANCE</span>
-                          <span className="td-value">{liveDist} / {distance} M km</span>
+                          <span className="td-value">{liveDist} / {rocket.pathMkm} M km</span>
                           <span className="td-label">RADIATION</span>
                           <span className="td-value" style={{color:radColor(liveRad)}}>{liveRad} mSv</span>
                           <span className="td-label">FUEL LEFT</span>
@@ -2512,7 +2462,7 @@ export default function App() {
                   <div style={{fontSize:'0.6rem', color:'#555', marginTop:'8px',
                     fontFamily:'Share Tech Mono', padding:'4px 8px',
                     border:'1px solid #2a1a0a', borderRadius:'4px', display:'inline-block'}}>
-                    ★ marks best among fleet only (Chemical · NTR · Starship). Custom rocket shown for reference.
+                    ★ marks best among fleet only (Chemical · NTR · Starship). Custom rocket shown for reference. Success and crew health are heuristics.
                   </div>
                 )}
               </div>
@@ -2522,7 +2472,7 @@ export default function App() {
             {debriefTab === 'charts' && (
               <div>
                 <div className="charts-grid">
-                  {['transit','radiation','cost','success','payloadMars','propellant'].map(mk => (
+                  {['transit','missionDose','imleo','cost','launches','success'].map(mk => (
                     <BarChart key={mk} metricKey={mk}
                       rocketList={rocketEntries.filter(([k])=>k!=='player').map(([,r])=>r)}/>
                   ))}
@@ -2536,8 +2486,8 @@ export default function App() {
                     {' '}(custom) —{' '}
                     transit {racedRockets.player.transit}d · radiation {racedRockets.player.radiation} mSv ·
                     ΔV {racedRockets.player.deltaV} km/s · bone loss {racedRockets.player.boneLossPct}% ·
-                    abort ΔV {racedRockets.player.abortDv} km/s · cost ${racedRockets.player.cost}B ·
-                    payload {(racedRockets.player.payloadMars/1000).toFixed(0)}t
+                    spare ΔV {racedRockets.player.abortDv} km/s · cost ${racedRockets.player.cost}B ·
+                    mass in LEO {racedRockets.player.imleo}t
                     <span style={{color:'#555', display:'block', marginTop:'4px', fontSize:'0.6rem'}}>
                       Custom rocket data shown above for reference only — not included in fleet comparison.
                     </span>
@@ -2546,82 +2496,88 @@ export default function App() {
               </div>
             )}
 
-            {/* INSIGHTS */}
+            {/* INSIGHTS — generated from the engine's results; no vehicle is assumed to win */}
             {debriefTab === 'insights' && (() => {
-              const chem = racedRockets.chemical;
-              const ntr  = racedRockets.nuclear;
-              const shp  = racedRockets.starship;
-              const pl   = racedRockets.player;
+              const fleet = VEHICLE_IDS.map(id => racedRockets[id]).filter(Boolean);
+              const flying = fleet.filter(r => !r.failed);
+              const fastest = flying.length ? flying.reduce((a, b) => (b.transit < a.transit ? b : a)) : null;
+              const slowest = flying.length ? flying.reduce((a, b) => (b.transit > a.transit ? b : a)) : null;
+              const pctLower = (a, b) => Math.round((1 - a / b) * 100);
               return (
                 <div>
                   <div className="insights">
                     <div className="insights-header">
                       <span className="insights-icon">◈</span>
-                      <h3>FLEET COMPARISON: CHEMICAL vs NTR vs STARSHIP — {year} · {distance} M km · {crewSize} CREW</h3>
+                      <h3>FLEET TRADE-OFFS — {year} WINDOW · {transferOption.label.toUpperCase()} · {crewSize} CREW</h3>
                     </div>
-                    <ul style={{paddingLeft:'18px', lineHeight:'2.2', fontSize:'0.82rem', color:'var(--text)'}}>
-                      <li>
-                        <strong style={{color:'#3B8BD4'}}>NTR arrives {(chem.transit-ntr.transit).toFixed(0)} days before Chemical</strong> and{' '}
-                        {(shp.transit-ntr.transit).toFixed(0)} days before Starship.
-                        Physics (Tsiolkovsky): ISP 900s → Ve = 8,829 m/s vs Chemical 450s → 4,414 m/s.
-                        ΔV = Ve × ln(m₀/mf) gives NTR <strong>7.2 km/s</strong> vs Chemical 4.5 km/s → faster transfer orbit.
-                        <em style={{color:'#5a4030'}}> Source: NASA DRA 5.0 (2009); Borowski et al. AIAA-2012-5144.</em>
-                      </li>
-                      <li>
-                        <strong style={{color:'#3B8BD4'}}>NTR propellant: {(ntr.propellant/1000).toFixed(0)}t</strong> vs {(chem.propellant/1000).toFixed(0)}t Chemical
-                        = <strong style={{color:'#6edc52'}}>{Math.round((1-ntr.propellant/chem.propellant)*100)}% less propellant</strong>.
-                        Ve twice as high → same ΔV with 4× less propellant → 1 launch vs {chem.launches}× SLS at $2.7B each.
-                        <em style={{color:'#5a4030'}}> Source: NASA IG Report 2022 (SLS cost); Tsiolkovsky 1903.</em>
-                      </li>
-                      <li>
-                        <strong style={{color:'#3B8BD4'}}>NTR radiation: {ntr.radiation} mSv</strong> = <strong style={{color:'#6edc52'}}>{ntr.careerRadPct}% of career limit</strong>.
-                        Chemical: {chem.radiation} mSv ({chem.careerRadPct}%). Starship: {shp.radiation} mSv ({shp.careerRadPct}%).
-                        Dose = 1.3 mSv/day × transit days. Shorter transit = less exposure. Career limit 600 mSv (3% REID, NASA STD-3001 Rev C 2023).
-                        <em style={{color:'#5a4030'}}> Source: Zeitlin et al. Science 340:1080 (2013); NCRP Report 132; NASA STD-3001.</em>
-                      </li>
-                      <li>
-                        <strong style={{color:'#3B8BD4'}}>NTR bone loss: {ntr.boneLossPct}%</strong> hip density vs Chemical {chem.boneLossPct}%, Starship {shp.boneLossPct}%.
-                        Rate 0.43%/month with ARED exercise countermeasures (ISS data). Shorter NTR transit directly reduces bone loss.
-                        <em style={{color:'#5a4030'}}> Source: Leblanc et al. 2007, Osteoporosis International; PMID:17047197.</em>
-                      </li>
-                      <li>
-                        <strong style={{color:'#3B8BD4'}}>NTR abort reserve: {ntr.abortDv} km/s</strong> vs Chemical {chem.abortDv} km/s vs Starship {shp.abortDv} km/s.
-                        ΔV reserve = total ΔV − 3.5 km/s minimum. Higher reserve = more trajectory correction options, wider abort window.
-                        Starship's 0.3 km/s reserve leaves almost no margin for engine anomalies or trajectory errors.
-                        <em style={{color:'#5a4030'}}> Source: Tsiolkovsky equation; 3.5 km/s threshold from NASA DRA 5.0.</em>
-                      </li>
+                    <TradeoffList rockets={racedRockets} />
+                    <ul style={{paddingLeft:'18px', lineHeight:'2.0', fontSize:'0.8rem', color:'var(--text)', marginTop:'12px'}}>
+                      {fastest && slowest && fastest !== slowest && (
+                        <li>
+                          <strong style={{color:fastest.color}}>{fastest.label}</strong> arrives{' '}
+                          {(slowest.transit - fastest.transit).toFixed(0)} days before {slowest.label} ({fastest.transit} d vs {slowest.transit} d).
+                          Its outbound dose is {pctLower(fastest.radiation, slowest.radiation)}% lower, but its round-trip dose is only{' '}
+                          {pctLower(fastest.missionDose, slowest.missionDose)}% lower: a faster outbound leg means waiting longer on Mars
+                          ({fastest.surfaceStay} d vs {slowest.surfaceStay} d) for the planets to line up for the return.
+                          <em style={{color:'#5a4030'}}> Model: conjunction-class phasing; RAD cruise 1.84 mSv/day, surface 0.64 mSv/day.</em>
+                        </li>
+                      )}
+                      {flying.map(r => (
+                        <li key={r.shortLabel}>
+                          <strong style={{color:r.color}}>{r.label}:</strong>{' '}
+                          Δv {r.deltaVDeparture} km/s departure + {r.deltaVCapture} km/s capture
+                          {r.deltaVCapture === 0 ? ' (aerocapture)' : ''} · ISP {r.isp} s → {(r.propellant/1000).toFixed(0)} t propellant ·
+                          {' '}{r.imleo} t in LEO · {r.launches} launch{r.launches > 1 ? 'es' : ''} · ${r.cost}B (est.) ·
+                          {' '}{r.abortDv} km/s spare Δv · success {r.success}% (heuristic)
+                        </li>
+                      ))}
+                      {fleet.filter(r => r.failed).map(r => (
+                        <li key={r.shortLabel} style={{color:'#ff8080'}}>
+                          <strong>{r.label} cannot fly this mission:</strong> {r.failReason}
+                        </li>
+                      ))}
+                      {flying.length > 0 && (
+                        <li>
+                          Every crew in this scenario receives{' '}
+                          {Math.min(...flying.map(r => r.careerRadPct)).toFixed(0)}–{Math.max(...flying.map(r => r.careerRadPct)).toFixed(0)}%
+                          of NASA's 600 mSv career limit over the full mission. With today's shielding, radiation is a problem
+                          for every propulsion choice, not just the slow ones.
+                          <em style={{color:'#5a4030'}}> Sources: Zeitlin et al. Science 340:1080 (2013); Hassler et al. Science 343 (2014); NASA-STD-3001.</em>
+                        </li>
+                      )}
                       {(() => {
                         const allHazards = Object.entries(appliedHazards);
                         const totalHits  = allHazards.reduce((s,[,h]) => s+h.length, 0);
                         if (totalHits === 0) return null;
                         return (
                           <li>
-                            This mission encountered <strong style={{color:'#ffc107'}}>{totalHits} space hazard event{totalHits>1?'s':''}</strong>:{' '}
+                            This run encountered <strong style={{color:'#ffc107'}}>{totalHits} random hazard event{totalHits>1?'s':''}</strong>{' '}
+                            (gameplay layer; they do not change the physics results above):{' '}
                             {allHazards.map(([key, hits]) => (
                               <span key={key} style={{marginRight:'12px'}}>
                                 {rockets[key]?.label}: {hits.map(h => h.icon+' '+h.name.split(' ')[0]).join(', ')}
                               </span>
                             ))}
-                            Solar flares cause Forbush decreases in GCR (Belov et al. 2008). Micrometeorite flux from Grün et al. 1985.
-                            Engine anomaly probability based on TRL (lower TRL = higher chance, real engineering practice).
                           </li>
                         );
                       })()}
-                      {/* Custom rocket excluded from fleet comparison — see TABLE tab for all results */}
                     </ul>
+                    <div style={{fontSize:'0.62rem', color:'#777', marginTop:'8px', fontFamily:'Share Tech Mono'}}>
+                      Success and crew-health figures are simplified heuristics (products of assumed reliabilities and an illustrative
+                      dose/zero-g score), not engineering predictions. Vehicle masses and costs marked "est." are estimates; see
+                      src/physics/README.md.
+                    </div>
                   </div>
                   <div className="sources">
                     <div className="sources-title">DATA SOURCES</div>
                     <div className="sources-list">
-                      NASA DRA 5.0 (2009) · NERVA 1965–1972 (ISP 841s achieved) ·
-                      Curiosity RAD — Zeitlin et al. 2013 Science 340:1080 (1.3 mSv/day GCR) ·
-                      NASA STD-3001 Rev C (600 mSv career limit) · Borowski et al. AIAA-2012-5144 (NTR fast-transit) ·
-                      SpaceX Raptor 2 2023 (ISP 380s) · NASA IG 2022 (SLS ≈ $2.7B/launch) ·
-                      JPL Horizons (opposition distances) · Tsiolkovsky 1903 ·
-                      NASA NSSDC (Moon 27.3d/384,400km · Phobos 7.66h/9,376km · Deimos 30.3h/23,458km) ·
-                      NASA ISS (period 92.68 min · altitude 408 km) ·
-                      ESA Space Debris Report 2024 (27,000+ tracked objects) ·
-                      JPL CNEOS 2024 (34,000+ NEOs) · Grün et al. 1985 (meteorite flux)
+                      NASA NSSDC planetary fact sheets (μ, radii, orbits) · JPL/Standish Keplerian elements (planet positions) ·
+                      NASA DRA 5.0, NASA-SP-2009-566 (capture orbit, NTR Isp 900 s) · Rover/NERVA ground tests (≈ 850 s) ·
+                      Aerojet Rocketdyne RL10 (Isp ≈ 460 s) · SpaceX Starship (1,200 t, Raptor Vac ≈ 380 s) ·
+                      NASA OIG IG-22-003 (SLS ≈ $2.2B/launch) · Curiosity RAD: Zeitlin et al. 2013 (1.84 mSv/day cruise),
+                      Hassler et al. 2014 (0.64 mSv/day surface) · NASA-STD-3001 (600 mSv career limit) · NASA BVAD (consumables) ·
+                      Tsiolkovsky 1903 · NASA NSSDC (Moon 27.3d/384,400km · Phobos 7.66h/9,376km · Deimos 30.3h/23,458km) ·
+                      NASA ISS (period 92.68 min · altitude 408 km) · ESA Space Debris Report 2024 · JPL CNEOS 2024 · Grün et al. 1985
                     </div>
                   </div>
                 </div>
