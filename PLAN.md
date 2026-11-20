@@ -327,3 +327,33 @@ Files: `frontend/index.html`, `public/{og.png,favicon.svg,robots.txt}`, `README.
 | three.js weight hurts Lighthouse | Lazy chunk, 2D default on mobile/weak devices |
 | CSP blocks R3F/workers or fonts | Self-host assets; test CSP under `vite preview` with the headers applied |
 | Scope creep | Nice-to-haves only after Phase 9 is green |
+
+## 6. Revised scope after user feedback (2026-11-20, binding)
+
+The user reviewed the site and raised the bar: professional-team visual quality, every
+number verified, zero known bugs. Changes to the phases above:
+
+- **Design contract first.** `docs/DESIGN.md` (UI Designer + UX Architect + Brand Guardian):
+  type scale (display/text/mono, self-hosted), restrained token palette (WCAG AA computed),
+  4/8 px spacing, grid, motion, lucide icons, data-viz styling, screen wireframes,
+  finish-gate checklist. Phase 4 keeps to structure/a11y/tooling; Phase 5 *rebuilds* the UI on
+  DESIGN.md (not a re-skin): app shell, config panel, main visualization, telemetry/results,
+  polished components, consistent number formatting, empty/loading/error states,
+  375/768/1440 px.
+- **Finish gate on every UI phase.** UI Finish-Gate Reviewer reviews Playwright screenshots at
+  375/768/1440 against DESIGN.md; no must-fix items remain before commit. Screenshots saved in
+  `docs/screenshots/` (reused in README).
+- **Fact check.** Reality Checker audits every number and claim in the UI and copy against
+  primary sources → `docs/FACT_CHECK.md` (claim → value → source → status). Unverifiable items
+  fixed or removed; estimates labelled "est." in the UI; sources visible where claims are made.
+  Includes the Phase 2 reality-check fixes: OIG citation for $2.5 B (IG-24-001), Raptor Vac
+  Isp/propellant sourcing, dead radiation score component + unreachable achievement, launch
+  reliability by launcher status, capture-method and launcher-cost framing in the comparison.
+- **Quality bar.** No console errors/warnings, no layout breakage at any width, no dead
+  buttons, placeholders or TODOs in shipped UI. Lighthouse ≥ 95 target (90 floor), real scores
+  reported.
+- **New deliverable:** `docs/HOW_IT_WORKS.md`, a plain-language explainer for the student
+  (models, formulas with a worked example from the app, assumptions, design decisions,
+  10 interview questions with answers).
+- **Phase D** = Reality Checker + UI Finish-Gate Reviewer + Accessibility Auditor; fix all flags.
+- No scope cuts for speed; anything that can't meet the bar is reported, not shipped half-done.
