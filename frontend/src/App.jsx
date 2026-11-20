@@ -85,6 +85,15 @@ const RAD_RATE  = 1.3;   // mSv/day — Curiosity RAD, Zeitlin et al. Science 20
 const RACE_MS   = 60000;
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
+/* localStorage can throw (private mode, blocked storage, quota) — never let it crash the app. */
+const INSTALL_DISMISSED_KEY = 'mars-mmc-install-dismissed';
+const safeStorageGet = (key) => {
+  try { return window.localStorage.getItem(key); } catch { return null; }
+};
+const safeStorageSet = (key, value) => {
+  try { window.localStorage.setItem(key, value); } catch { /* storage unavailable */ }
+};
+
 // Transit calibrated to NASA anchors (verified against DRA 5.0 and Borowski AIAA-2012-5144)
 // physTransit(4.5)=242d ≈ DRA 5.0 Chemical 247d  |  physTransit(7.2)=123d = Borowski NTR 123.5d  |  physTransit(3.8)=288d exact
 const physTransit = dv => +clamp(742 * Math.exp(-0.249 * dv), 80, 360).toFixed(1);
@@ -403,6 +412,10 @@ function CockpitView({ rocket, rocketRp, distance, hazardsHit }) {
   const [impactAnim, setImpactAnim] = useState(null);
   const [cracks,     setCracks]     = useState([]);
   const prevHazRef = useRef(0);
+  const impactTimerRef = useRef(null);
+
+  // Clear any pending impact-animation timeout on unmount.
+  useEffect(() => () => clearTimeout(impactTimerRef.current), []);
 
   useEffect(() => {
     if (hazardsHit.length > prevHazRef.current) {
@@ -424,7 +437,8 @@ function CockpitView({ rocket, rocketRp, distance, hazardsHit }) {
           ],
         }]);
       }
-      setTimeout(() => setImpactAnim(null), 2200);
+      clearTimeout(impactTimerRef.current);
+      impactTimerRef.current = setTimeout(() => setImpactAnim(null), 2200);
     }
     prevHazRef.current = hazardsHit.length;
   }, [hazardsHit.length]);
@@ -662,8 +676,10 @@ function CockpitView({ rocket, rocketRp, distance, hazardsHit }) {
           { x:195, label:'MISSION DAY', val:`${day} / ${rocket.transit}d`, col:'#fff'       },
           { x:330, label:'RADIATION',   val:`${adjRad} mSv`,          col:radColor(adjRad) },
           { x:460, label:'DISTANCE',    val:`${distKm}M km`,          col:'#fff'           },
-          { x:600, label:'CREW HEALTH', val:`${rocket.crewHealth}%`,
-            col: rocket.crewHealth > 70 ? '#6edc52' : rocket.crewHealth > 50 ? '#f4ae2a' : '#ff5555' },
+          // crewHealth is not modelled yet (Phase 1) — show a dash instead of "undefined%".
+          { x:600, label:'CREW HEALTH', val: Number.isFinite(rocket.crewHealth) ? `${rocket.crewHealth}%` : '—',
+            col: !Number.isFinite(rocket.crewHealth) ? '#fff'
+              : rocket.crewHealth > 70 ? '#6edc52' : rocket.crewHealth > 50 ? '#f4ae2a' : '#ff5555' },
           { x:740, label:'FUEL',        val:`${fuelLeft}%`,           col:'#fff'           },
         ].map(item => (
           <g key={item.label}>
@@ -869,6 +885,30 @@ export default function App() {
   const raceHazardsRef = useRef({});
   const laneYsRef      = useRef([]);
   const rocketOrderRef = useRef([]);
+  const countdownRef   = useRef(null);       // launch countdown interval id
+  const raceTimeoutsRef = useRef(new Set()); // pending race-related timeout ids
+  const launchIdRef    = useRef(0);          // invalidates in-flight launches on reset
+
+  const scheduleRaceTimeout = (fn, ms) => {
+    const id = setTimeout(() => {
+      raceTimeoutsRef.current.delete(id);
+      fn();
+    }, ms);
+    raceTimeoutsRef.current.add(id);
+    return id;
+  };
+
+  const clearAllRaceTimers = () => {
+    clearInterval(raceRef.current);
+    raceRef.current = null;
+    clearInterval(countdownRef.current);
+    countdownRef.current = null;
+    raceTimeoutsRef.current.forEach(clearTimeout);
+    raceTimeoutsRef.current.clear();
+  };
+
+  // Clear every pending race/countdown timer on unmount.
+  useEffect(() => () => clearAllRaceTimers(), []);
   const distance = DISTANCES[year];
 
   /* ── All rockets (base + optional player), scaled for current params ── */
@@ -967,27 +1007,27 @@ export default function App() {
   useEffect(() => {
     const messages = ['INITIALIZING SYSTEMS', 'LOADING TELEMETRY', 'CALCULATING TRAJECTORY', 'ALL SYSTEMS GO'];
     let messageIndex = 0;
+    let progress = 0;
+    // Track progress locally so the state updater stays pure (no side effects inside it).
     const interval = setInterval(() => {
-      setLoadingProgress(prev => {
-        const newProgress = prev + (100 / 300); // 3 seconds, 100 updates
-        if (newProgress >= 100) {
-          setIsLoading(false);
-          clearInterval(interval);
-          return 100;
-        }
-        if (newProgress >= (messageIndex + 1) * 25) {
-          messageIndex = (messageIndex + 1) % messages.length;
-          setLoadingText(messages[messageIndex]);
-        }
-        return newProgress;
-      });
+      progress = Math.min(progress + (100 / 300), 100); // ~9 seconds at 30ms ticks
+      setLoadingProgress(progress);
+      if (progress >= 100) {
+        clearInterval(interval);
+        setIsLoading(false);
+        return;
+      }
+      if (progress >= (messageIndex + 1) * 25) {
+        messageIndex = (messageIndex + 1) % messages.length;
+        setLoadingText(messages[messageIndex]);
+      }
     }, 30); // ~30ms for smooth animation
     return () => clearInterval(interval);
   }, []);
 
   /* ── PWA Install Prompt ── */
   useEffect(() => {
-    const isDismissed = localStorage.getItem('mars-mmc-install-dismissed');
+    const isDismissed = safeStorageGet(INSTALL_DISMISSED_KEY);
     if (isDismissed) {
       installPromptRef.current = true;
       return;
@@ -1019,7 +1059,7 @@ export default function App() {
     const handleAppInstalled = () => {
       setDeferredPrompt(null);
       setShowInstallBanner(false);
-      localStorage.setItem('mars-mmc-install-dismissed', 'true');
+      safeStorageSet(INSTALL_DISMISSED_KEY, 'true');
       installPromptRef.current = true;
     };
 
@@ -1035,7 +1075,7 @@ export default function App() {
   /* ── Show install banner after loading finishes ── */
   useEffect(() => {
     if (!isLoading && !installPromptRef.current) {
-      const isDismissed = localStorage.getItem('mars-mmc-install-dismissed');
+      const isDismissed = safeStorageGet(INSTALL_DISMISSED_KEY);
       if (!isDismissed) {
         setShowInstallBanner(true);
       }
@@ -1052,12 +1092,12 @@ export default function App() {
     }
     setShowInstallBanner(false);
     installPromptRef.current = true;
-    localStorage.setItem('mars-mmc-install-dismissed', 'true');
+    safeStorageSet(INSTALL_DISMISSED_KEY, 'true');
   };
 
   const handleDismissInstall = () => {
     setShowInstallBanner(false);
-    localStorage.setItem('mars-mmc-install-dismissed', 'true');
+    safeStorageSet(INSTALL_DISMISSED_KEY, 'true');
     installPromptRef.current = true;
   };
 
@@ -1077,13 +1117,13 @@ export default function App() {
             const copy = { ...h };
             setAppliedHazards(prev => ({ ...prev, [key]: [...(prev[key]||[]), copy] }));
             setActiveHazardAlert({ key, hazard: copy });
-            setTimeout(() => setActiveHazardAlert(prev =>
+            scheduleRaceTimeout(() => setActiveHazardAlert(prev =>
               prev?.hazard?.id === copy.id && prev?.key === key ? null : prev
             ), 3500);
             if (['debris', 'micrometeorite'].includes(copy.id)) {
               const dir = Math.random() > 0.5 ? -22 : 22;
               setDodgeOffsets(p => ({...p, [key]: dir}));
-              setTimeout(() => setDodgeOffsets(p => ({...p, [key]: 0})), 800);
+              scheduleRaceTimeout(() => setDodgeOffsets(p => ({...p, [key]: 0})), 800);
             }
             // Spawn a targeted impact event for this rocket
             const keyIdx = rocketOrderRef.current.indexOf(key);
@@ -1094,7 +1134,7 @@ export default function App() {
               id: impId, key, x: impX, y: impY,
               type: copy.id, color: copy.color, icon: copy.icon,
             }]);
-            setTimeout(() => setImpactEvents(p => p.filter(e => e.id !== impId)), 1500);
+            scheduleRaceTimeout(() => setImpactEvents(p => p.filter(e => e.id !== impId)), 1500);
           }
         });
       });
@@ -1102,7 +1142,7 @@ export default function App() {
       if (progress >= 1) {
         clearInterval(id);
         setRaceRunning(false);
-        setTimeout(() => setShowDebrief(true), 600);
+        scheduleRaceTimeout(() => setShowDebrief(true), 600);
       }
     }, 50);
     raceRef.current = id;
@@ -1111,6 +1151,7 @@ export default function App() {
 
   /* ── Start mission ── */
   const startMission = async () => {
+    clearAllRaceTimers();
     setShowDebrief(false);
     setRaceProgress(0);
     setAppliedHazards({});
@@ -1162,22 +1203,33 @@ export default function App() {
     setCockpitKey(rockets.player ? 'player' : 'nuclear');
 
     setLaunched(true);
+    // Each launch gets an id; if NEW MISSION is pressed (or another launch starts)
+    // while the API call is in flight, this stale launch must not start a countdown.
+    const launchId = ++launchIdRef.current;
     try {
       await axios.post('http://localhost:8000/api/mission',
         { crew_size: crewSize, year, risk }, { timeout: 3000 });
     } catch { /* local physics fallback active */ }
+    if (launchId !== launchIdRef.current) return;
 
     let n = 5;
     setCountdown(n);
-    const cd = setInterval(() => {
+    clearInterval(countdownRef.current);
+    countdownRef.current = setInterval(() => {
       n--;
-      if (n <= 0) { clearInterval(cd); setCountdown(null); setRaceRunning(true); }
+      if (n <= 0) {
+        clearInterval(countdownRef.current);
+        countdownRef.current = null;
+        setCountdown(null);
+        setRaceRunning(true);
+      }
       else setCountdown(n);
     }, 1000);
   };
 
   const resetMission = () => {
-    clearInterval(raceRef.current);
+    launchIdRef.current++;
+    clearAllRaceTimers();
     setShowDebrief(false); setLaunched(false);
     setRaceProgress(0);    setRaceRunning(false);
     setCountdown(null);    setAppliedHazards({});
@@ -2328,7 +2380,7 @@ export default function App() {
                           <span className="td-label">FUEL LEFT</span>
                           <span className="td-value">{fuelLeft}%</span>
                           <span className="td-label">CREW HEALTH</span>
-                          <span className="td-value">{rocket.crewHealth}%</span>
+                          <span className="td-value">{Number.isFinite(rocket.crewHealth) ? `${rocket.crewHealth}%` : '—'}</span>
                         </div>
                         {/* Active hazards on this rocket */}
                         {hits.length > 0 && (
@@ -2584,5 +2636,6 @@ export default function App() {
 
       </div>
     </div>
+    </>
   );
 }

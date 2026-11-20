@@ -1,5 +1,30 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
-.env
-.DS_Store
+coverage/
+frontend/dev-dist/
+
+# Python
 __pycache__/
+*.pyc
+venv/
+.venv/
+
+# Local databases
+*.db
+*.sqlite
+
+# Environment / secrets
+.env*
+!.env.example
+
+# Deployment
+.vercel/
+
+# Local tool settings
+.claude/settings.local.json
+
+# OS
+.DS_Store
