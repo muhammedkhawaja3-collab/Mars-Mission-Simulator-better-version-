@@ -31,19 +31,28 @@ jobs:
       - run: npm run build
 
   backend:
-    name: Backend (pytest)
+    name: Backend (ruff, pytest, Vercel entry)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version-file: .python-version
           cache: pip
           cache-dependency-path: |
+            requirements.txt
             backend/requirements.txt
             backend/requirements-dev.txt
-      - run: pip install -r requirements.txt -r requirements-dev.txt
-      - run: pytest
+      # backend/requirements-dev.txt chains to backend/requirements.txt and the
+      # root requirements.txt (the Vercel runtime set).
+      - run: pip install -r requirements.txt -r backend/requirements-dev.txt
+      # Ruff reads the root pyproject.toml and covers backend/ and api/.
+      - run: ruff check .
+      - run: ruff format --check .
+      # Tests resolve shared/golden_cases.json relative to their own path.
+      - run: python -m pytest
+        working-directory: backend
+      - name: Vercel entry point imports the app
+        run: python -c "from api.index import app; assert app.title"
+      - name: vercel.json is valid JSON
+        run: python -m json.tool vercel.json > /dev/null

@@ -1,0 +1,4 @@
+# Runtime dependencies for the Python API (installed by Vercel for api/index.py).
+fastapi==0.165.0
+starlette==1.10.0
+pydantic>=2.9,<3

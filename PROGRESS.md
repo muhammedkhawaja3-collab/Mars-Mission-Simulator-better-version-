@@ -11,9 +11,13 @@ never deployed to production. Plan: [PLAN.md](PLAN.md). Audit: [AUDIT.md](AUDIT.
 | A Audit | a673c83 | AUDIT.md — architecture, backend/API, security, a11y, performance, UX/personas |
 | B Plan | a673c83 | PLAN.md — Must/Should/Nice, phased |
 | 2 Physics extension | (this commit) | Launch-vehicle catalog, stage × launcher model, BVAD life support, per-phase dose, seeded events (mulberry32), recoverable-launch success factors, score/achievements, fixed window IDs, 23 golden cases in `shared/golden_cases.json`, App copy fixes; 152 Vitest tests |
+| 3 Backend mirror + API + Vercel | (this commit) | `backend/app/physics/` mirrors the JS engine 1:1 (mulberry32 bit-exact, JS `Date`/`%`/`toFixed` semantics in `jscompat.py`); all 23 golden cases match (rel 1e-9, key order, int/float types). FastAPI ≥ 0.115 (0.165.0) / Starlette 1.10.0 / pydantic 2.x: strict `POST /api/mission` (snake_case + camelCase aliases), `GET /api/health`, `/api/vehicles`, `/api/windows`, uniform `{error:{code,message,details}}` envelope (NaN/Infinity → 422, never 500), dev-only CORS. `api/index.py` + `vercel.json` (functions, `/api` rewrite, CSP/HSTS/COOP headers, `sw.js` no-cache), root `requirements.txt`, `.python-version` 3.12, root `pyproject.toml` (ruff lint + format), CI backend job runs ruff + pytest; 147 pytest tests |
 
 ## In progress
-- Phase 3: Python mirror of the engine against `shared/golden_cases.json` (output keys: frontend/src/physics/README.md, "Output shape").
+- Phase 3 frontend side (frontend agent): Vite `/api` proxy and the API client / "server agrees" badge.
+
+## Notes
+- Vercel preview failures since Phase 0 — FIXED. Root cause: Vercel dashboard Root Directory was `frontend`, so `cd frontend` failed; cleared to repo root on 2026-11-20 (by the user/coordinator).
 
 ## Next
 See PLAN.md phase list: 3 backend mirror + Vercel API · 4 refactor/design system/a11y · 5 core experience · 6 compare/share · 7 3D · 8 delight · 9 launch quality · D final review.
