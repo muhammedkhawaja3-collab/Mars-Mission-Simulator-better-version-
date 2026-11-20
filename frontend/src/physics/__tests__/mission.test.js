@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
-  simulateMission, crewPayloadMass, deltaVMargin, successEstimate, crewHealthIndex, CREW_PAYLOAD,
+  simulateMission, crewPayloadMass, deltaVMargin, crewHealthIndex, CREW_PAYLOAD,
 } from '../mission.js';
+import { successEstimate } from '../success.js';
+import { LAUNCH_VEHICLES } from '../launchVehicles.js';
+import { lifeSupportMass } from '../lifeSupport.js';
 import { VEHICLES, VEHICLE_IDS, createCustomVehicle } from '../vehicles.js';
 import { launchWindows } from '../ephemeris.js';
 import { summarizeTradeoffs } from '../tradeoffs.js';
@@ -54,26 +57,33 @@ describe('default mission (4 crew, next window, fastest transfer each vehicle ca
     expect(results.nuclear.deltaV.capture).toBeGreaterThan(0);
   });
 
-  it('cost = hardware + launches × cost per launch, and Starship counts the ship plus its tankers', () => {
+  it('cost = hardware + launches × launcher cost + expected re-flights, and Starship counts the ship plus its tankers', () => {
     for (const [id, m] of Object.entries(results)) {
       const v = VEHICLES[id];
-      expect(m.cost.total).toBeCloseTo(v.hardwareCost + m.launches * v.launch.costPerLaunch, 0);
+      const lv = LAUNCH_VEHICLES[v.defaultLaunchVehicle];
+      expect(m.launchVehicleId).toBe(v.defaultLaunchVehicle);
+      expect(m.cost.launches).toBeCloseTo(m.launches * lv.costPerLaunchUsd, 0);
+      expect(m.cost.total).toBeCloseTo(v.hardwareCost + m.cost.launches + m.cost.reflightReserve, 0);
+      expect(m.cost.reflightReserve).toBeCloseTo(m.launchPlan.expectedReflights * lv.costPerLaunchUsd, 0);
     }
     const s = results.starship;
-    expect(s.launches).toBe(1 + Math.ceil(s.mass.propellant / VEHICLES.starship.launch.capacityPerLaunch - 1e-9));
+    expect(s.launches).toBe(1 + Math.ceil(s.mass.propellant / LAUNCH_VEHICLES.starship.payloadLeoKg - 1e-9));
+    const c = results.chemical;
+    expect(c.launches).toBe(Math.ceil(c.mass.initialMassInLEO / LAUNCH_VEHICLES['sls-block1'].payloadLeoKg - 1e-9));
   });
 
   it('dose = measured rate × time for each phase', () => {
     for (const m of Object.values(results)) {
-      expect(m.dose.transit).toBeCloseTo(GCR_CRUISE_DOSE_RATE * m.transitTime, 9);
+      expect(m.dose.outbound).toBeCloseTo(GCR_CRUISE_DOSE_RATE * m.transitTime, 9);
       expect(m.dose.surface).toBeCloseTo(MARS_SURFACE_DOSE_RATE * m.duration.surfaceStay, 9);
-      expect(m.dose.mission).toBeCloseTo(m.dose.transit + m.dose.surface + m.dose.return, 9);
-      expect(m.dose.careerFraction).toBeCloseTo(m.dose.mission / CAREER_DOSE_LIMIT, 9);
+      expect(m.dose.events).toBe(0); // no seed → no gameplay events
+      expect(m.dose.total).toBeCloseTo(m.dose.outbound + m.dose.surface + m.dose.return + m.dose.events, 12);
+      expect(m.dose.careerFraction).toBeCloseTo(m.dose.total / CAREER_DOSE_LIMIT, 9);
     }
   });
 
   it('a 1.84 mSv/day cruise rate over ~200+ days is hundreds of mSv (RAD-scale numbers)', () => {
-    const msv = results.chemical.dose.transit * 1000;
+    const msv = results.chemical.dose.outbound * 1000;
     expect(msv).toBeGreaterThan(200);
     expect(msv).toBeLessThan(600);
   });
@@ -105,7 +115,7 @@ describe('monotonicity', () => {
       expect(m.feasible).toBe(true);
       expect(days(m.transitTime)).toBeCloseTo(d, 1);
       expect(m.deltaV.total).toBeGreaterThan(prev.deltaV.total);
-      expect(m.dose.transit).toBeLessThan(prev.dose.transit);
+      expect(m.dose.outbound).toBeLessThan(prev.dose.outbound);
       prev = m;
     }
   });
@@ -121,20 +131,22 @@ describe('monotonicity', () => {
     const lo = simulateMission({ vehicle: twin(460), launchDate });
     const hi = simulateMission({ vehicle: twin(900), launchDate });
     expect(hi.transitTime).toBeLessThan(lo.transitTime);
-    expect(hi.dose.transit).toBeLessThan(lo.dose.transit);
+    expect(hi.dose.outbound).toBeLessThan(lo.dose.outbound);
   });
 
   it('higher risk tolerance → thinner margin → transit no longer, but success estimate lower', () => {
     const safe = simulateMission({ vehicle: 'chemical', launchDate, riskTolerance: 1 });
     const bold = simulateMission({ vehicle: 'chemical', launchDate, riskTolerance: 10 });
     expect(bold.transitTime).toBeLessThanOrEqual(safe.transitTime);
-    expect(bold.success.factors.deltaVMargin).toBeLessThan(safe.success.factors.deltaVMargin);
+    const marginFactor = (m) => m.successFactors.find((f) => f.id === 'delta-v-margin').probability;
+    expect(marginFactor(bold)).toBeLessThan(marginFactor(safe));
+    expect(bold.success.probability).toBeLessThan(safe.success.probability);
   });
 
   it('better GCR shielding lowers the cruise dose proportionally', () => {
     const base = simulateMission({ vehicle: createCustomVehicle({ name: 'a', isp: 900, stageDryMass: 60_000, propellantCapacity: 200_000 }), launchDate, transferChoice: HOHMANN });
     const shielded = simulateMission({ vehicle: createCustomVehicle({ name: 'b', isp: 900, stageDryMass: 60_000, propellantCapacity: 200_000, gcrShieldingFactor: 0.6 }), launchDate, transferChoice: HOHMANN });
-    expect(shielded.dose.transit).toBeCloseTo(0.6 * base.dose.transit, 9);
+    expect(shielded.dose.outbound).toBeCloseTo(0.6 * base.dose.outbound, 9);
   });
 });
 
@@ -143,7 +155,7 @@ describe('same-mission comparisons', () => {
     const ms = VEHICLE_IDS.map((id) => simulateMission({ vehicle: id, launchDate, transferChoice: HOHMANN }));
     for (const m of ms) {
       expect(m.transitTime).toBeCloseTo(ms[0].transitTime, 6);
-      expect(m.dose.mission).toBeCloseTo(ms[0].dose.mission, 9);
+      expect(m.dose.total).toBeCloseTo(ms[0].dose.total, 9);
     }
   });
 });
@@ -177,7 +189,8 @@ describe('feasibility limits', () => {
 describe('inputs', () => {
   it('launchYear picks the window nearest mid-year', () => {
     const m = simulateMission({ vehicle: 'nuclear', launchYear: 2033, transferChoice: HOHMANN });
-    expect(m.departureDate.getUTCFullYear()).toBe(2033);
+    expect(new Date(m.departureDate).getUTCFullYear()).toBe(2033);
+    expect(m.windowId).toBeNull();
   });
 
   it('rejects invalid input', () => {
@@ -189,7 +202,13 @@ describe('inputs', () => {
     expect(() => simulateMission({ vehicle: 'nuclear', riskTolerance: 11, launchDate })).toThrow(RangeError);
     expect(() => simulateMission({ vehicle: 'nuclear', launchDate, transferChoice: { kind: 'teleport' } })).toThrow(TypeError);
     expect(() => simulateMission({ vehicle: 'nuclear', launchDate, transferChoice: { kind: 'timeOfFlight', timeOfFlight: -1 } })).toThrow(RangeError);
-    expect(() => simulateMission({ vehicle: 'nuclear' })).toThrow(TypeError);
+    expect(() => simulateMission({ vehicle: 'nuclear', crewSize: 1, launchDate })).toThrow(RangeError);
+    expect(() => simulateMission({ vehicle: 'nuclear', crewSize: 9, launchDate })).toThrow(RangeError);
+    expect(() => simulateMission({ vehicle: 'nuclear', windowId: '2027-01' })).toThrow(RangeError);
+    expect(() => simulateMission({ vehicle: 'nuclear', launchVehicle: 'saturn-v' })).toThrow(TypeError);
+    expect(() => simulateMission({ vehicle: 'nuclear', seed: -1 })).toThrow(RangeError);
+    expect(() => simulateMission({ vehicle: 'nuclear', seed: 2 ** 32 })).toThrow(RangeError);
+    expect(() => simulateMission({ vehicle: 'nuclear', seed: 1.5 })).toThrow(RangeError);
     expect(() => simulateMission({ vehicle: 'nuclear', launchDate: new Date('nope') })).toThrow(TypeError);
     expect(() => simulateMission()).toThrow(TypeError);
   });
@@ -205,7 +224,8 @@ describe('component models', () => {
     const p = crewPayloadMass({ crewSize: 4, transitTime: 200 * DAY });
     const P = CREW_PAYLOAD;
     expect(p.habitat).toBe(P.habitatBaseMass + 4 * P.habitatMassPerCrew);
-    expect(p.consumables).toBeCloseTo(P.consumablesPerCrewDay * 4 * (200 + P.contingencyDays), 6);
+    expect(p.consumables).toBeCloseTo(lifeSupportMass({ crewSize: 4, outboundTime: 200 * DAY }).outbound.closedLoop, 6);
+    expect(lifeSupportMass({ crewSize: 4, outboundTime: 200 * DAY }).outbound.days).toBe(200 + P.contingencyDays);
     expect(p.total).toBeCloseTo(p.habitat + p.crew + p.consumables, 6);
   });
 
@@ -215,13 +235,16 @@ describe('component models', () => {
     expect(() => deltaVMargin(NaN)).toThrow(RangeError);
   });
 
-  it('success estimate is the product of its factors, and more launches lower it', () => {
+  it('success estimate is the product of its factors; extra uncrewed launches cost money, not success', () => {
     const v = VEHICLES.chemical;
-    const a = successEstimate({ vehicle: v, launches: 2, burns: 2, margin: 0.07 });
-    const b = successEstimate({ vehicle: v, launches: 6, burns: 2, margin: 0.07 });
-    const product = Object.values(a.factors).reduce((p, f) => p * f, 1);
+    const lv = LAUNCH_VEHICLES['sls-block1'];
+    const a = successEstimate({ vehicle: v, launchVehicle: lv, launches: 2, margin: 0.07 });
+    const b = successEstimate({ vehicle: v, launchVehicle: lv, launches: 6, margin: 0.07 });
+    const product = a.factors.reduce((p, f) => p * f.probability, 1);
     expect(a.probability).toBeCloseTo(product, 12);
-    expect(b.probability).toBeLessThan(a.probability);
+    expect(b.probability).toBe(a.probability); // assembled: one crewed launch + one crew docking either way
+    expect(b.recoverable.expectedReflights).toBeGreaterThan(a.recoverable.expectedReflights);
+    expect(b.recoverable.costPenaltyUsd).toBeGreaterThan(a.recoverable.costPenaltyUsd);
   });
 
   it('crew health index falls with dose and zero-g time and stays within 0–100', () => {

@@ -1,3 +1,5 @@
+> **Superseded (archived):** this brief fixed the results so nuclear thermal always won; the current design flies every vehicle on the same mission and lets the physics decide (see PLAN.md and frontend/src/physics/README.md).
+
 # Mars Mission Control — Project Brief
 
 ## What This Is

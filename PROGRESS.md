@@ -8,11 +8,12 @@ never deployed to production. Plan: [PLAN.md](PLAN.md). Audit: [AUDIT.md](AUDIT.
 |---|---|---|
 | 0 Stabilize | a142c84 | Build fixes, timer bugs, repo hygiene, PWA icons, ESLint/Vitest/pytest, CI |
 | 1 Physics engine | 46d50c9 | `frontend/src/physics/`: Hohmann/patched conics, ephemeris windows, rocket equation, mission model; 78 Vitest tests; App wired to engine |
-| A Audit | (this commit) | AUDIT.md — architecture, backend/API, security, a11y, performance, UX/personas |
-| B Plan | (this commit) | PLAN.md — Must/Should/Nice, phased |
+| A Audit | a673c83 | AUDIT.md — architecture, backend/API, security, a11y, performance, UX/personas |
+| B Plan | a673c83 | PLAN.md — Must/Should/Nice, phased |
+| 2 Physics extension | (this commit) | Launch-vehicle catalog, stage × launcher model, BVAD life support, per-phase dose, seeded events (mulberry32), recoverable-launch success factors, score/achievements, fixed window IDs, 23 golden cases in `shared/golden_cases.json`, App copy fixes; 152 Vitest tests |
 
 ## In progress
-- Phase 2: physics extension (launch vehicles, life support, seeded events, scoring, fixed windows, golden fixtures).
+- Phase 3: Python mirror of the engine against `shared/golden_cases.json` (output keys: frontend/src/physics/README.md, "Output shape").
 
 ## Next
 See PLAN.md phase list: 3 backend mirror + Vercel API · 4 refactor/design system/a11y · 5 core experience · 6 compare/share · 7 3D · 8 delight · 9 launch quality · D final review.

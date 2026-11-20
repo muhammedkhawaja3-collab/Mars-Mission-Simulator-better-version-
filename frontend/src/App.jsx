@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import {
-  simulateMission, launchWindows, createCustomVehicle, summarizeTradeoffs, exhaustVelocity,
-  VEHICLES, VEHICLE_IDS, CREW_PAYLOAD, deltaVMargin,
+  simulateMission, createCustomVehicle, summarizeTradeoffs, exhaustVelocity,
+  VEHICLES, VEHICLE_IDS, CREW_PAYLOAD, CONSUMABLES_PER_CREW_DAY, deltaVMargin,
+  LAUNCH_VEHICLES, LAUNCH_VEHICLE_IDS, WINDOWS, DEFAULT_WINDOW_ID,
   toDays, fromDays, toKmPerSecond, toTonnes, toMilliSieverts, toBillionUsd, toMillionKm,
 } from './physics/index.js';
 
@@ -11,10 +12,9 @@ import {
    ══════════════════════════════════════════════════════════ */
 const ENGINE_CATALOG = [
   // LH₂/LOX
-  { id:'rl10b2',   name:'RL-10B-2',       family:'LH₂/LOX',      isp:462, thrust:110,   trl:9, failRate:0.02, electric:false,
-    desc:'Delta IV upper stage. Most efficient flying chemical engine. 462s ISP achieved in testing.' },
-  { id:'j2x',      name:'J-2X',            family:'LH₂/LOX',      isp:448, thrust:1310,  trl:8, failRate:0.03, electric:false,
-    desc:'Saturn V J-2 heritage. SLS Block 1B upper stage design. 9 engines tested at NASA MSFC.' },
+  // thrust is in kN for every engine (electric thrusters are well under 1 kN; see fmtThrust).
+  { id:'rl10b2',   name:'RL-10B-2',       family:'LH₂/LOX',      isp:465.5, thrust:110, trl:9, failRate:0.02, electric:false,
+    desc:'Delta IV upper stage. 465.5 s vacuum ISP (Aerojet Rocketdyne data sheet). The RL10 family also powers the SLS upper stages (ICPS; four RL10C-3 on the planned Exploration Upper Stage).' },
   { id:'vinci',    name:'Vinci',           family:'LH₂/LOX',      isp:465, thrust:180,   trl:7, failRate:0.04, electric:false,
     desc:'ESA expander-cycle upper stage. Highest published ISP of any operational chemical engine.' },
   { id:'rl10c3',   name:'RL-10C-3',        family:'LH₂/LOX',      isp:456, thrust:110,   trl:8, failRate:0.025,electric:false,
@@ -37,10 +37,10 @@ const ENGINE_CATALOG = [
   { id:'bimodal',  name:'Bimodal NTR',     family:'NTR (LH₂)',    isp:900, thrust:270,   trl:4, failRate:0.10, electric:false,
     desc:'NASA GRC/Boeing concept. Dual propulsion+power mode. Borowski et al. AIAA-2012-5144. 900s design target.' },
   // Electric — high ISP but thrust too low for crewed impulsive burns
-  { id:'vasimr',   name:'VASIMR VX-200',   family:'Electric (Ar)',isp:5000,thrust:5.7,   trl:4, failRate:0.15, electric:true,
-    desc:'Ad Astra Rocket. 200 kW plasma. ⚠ Thrust too low for crewed impulsive Mars transit — real mission would take 3+ years.' },
-  { id:'nextc',    name:'NEXT-C Ion',      family:'Electric (Xe)',isp:4190,thrust:0.236, trl:8, failRate:0.05, electric:true,
-    desc:'NASA Dawn/Psyche heritage. ⚠ Thrust too low for crewed missions — cargo/robotic only. 4190s ISP measured.' },
+  { id:'vasimr',   name:'VASIMR VX-200',   family:'Electric (Ar)',isp:5000,thrust:0.0057, trl:4, failRate:0.15, electric:true,
+    desc:'Ad Astra Rocket. 200 kW plasma, ≈ 5.7 N of thrust. ⚠ Thrust too low for crewed impulsive Mars transit — real mission would take 3+ years.' },
+  { id:'nextc',    name:'NEXT-C Ion',      family:'Electric (Xe)',isp:4190,thrust:0.000236, trl:8, failRate:0.05, electric:true,
+    desc:'NASA Dawn/Psyche heritage, ≈ 0.236 N of thrust. ⚠ Thrust too low for crewed missions — cargo/robotic only. 4190s ISP measured.' },
 ];
 
 const TANK_OPTIONS = [
@@ -63,7 +63,7 @@ const HAB_OPTIONS = [
   { id:'capsule',   name:'Orion-class Capsule', dryMass:8000,  healthMod:-8,  desc:'Cramped 4-person crew capsule. High psychological stress on 200+ day transit.' },
   { id:'standard',  name:'NASA Transit Hab',    dryMass:20000, healthMod:0,   desc:'NASA DRA 5.0 reference. 4-crew capacity, no centrifuge. Baseline mission design.' },
   { id:'bigelow',   name:'Bigelow BA-330',      dryMass:24000, healthMod:6,   desc:'Inflatable 330 m³ module. Radiation-tolerant composite hull. More crew space.' },
-  { id:'centrifuge',name:'Centrifuge Hab',       dryMass:35000, healthMod:15,  desc:'Rotating section at 0.38g. Prevents bone/muscle loss. Best crew health outcome.' },
+  { id:'centrifuge',name:'Centrifuge Hab',       dryMass:35000, healthMod:15,  desc:'Rotating section at 0.38g. Artificial gravity is expected to reduce bone/muscle loss (never tested on a crewed spacecraft).' },
 ];
 
 const HAZARD_EVENTS = [
@@ -100,10 +100,13 @@ const safeStorageSet = (key, value) => {
 
 const radColor = v => v < 200 ? '#6edc52' : v < 350 ? '#f4ae2a' : '#ff5555';
 const round = (v, digits = 1) => +v.toFixed(digits);
-const fmtDate = (d) => d.toISOString().slice(0, 10);
+const fmtMonth = (iso) => new Date(iso).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+/** Thrust in kN → readable string (electric thrusters are shown in N). */
+const fmtThrust = (kN) => kN >= 1000 ? `${(kN / 1000).toFixed(1)} MN` : kN >= 1 ? `${kN} kN` : `${+(kN * 1000).toPrecision(3)} N`;
 
-// Next five Earth→Mars launch windows, from planet positions (JPL mean elements).
-const LAUNCH_WINDOWS = launchWindows({ after: new Date(), count: 5 });
+// Fixed launch windows (stable IDs, computed from JPL mean elements; see physics/windows.js).
+// Labelled by the Mars opposition year each window leads up to.
+const LAUNCH_WINDOWS = WINDOWS;
 
 const TRANSFER_OPTIONS = [
   { id: 'fastest', label: 'Fastest each vehicle can fly', choice: { kind: 'fastest' },
@@ -114,16 +117,14 @@ const TRANSFER_OPTIONS = [
     hint: 'Every vehicle flies the same 200-day trajectory, if it can.' },
 ];
 
-// Bone loss stays a UI-level illustration (the engine reports zero-g time).
 // careerRadPct uses the NASA-STD-3001 600 mSv career limit from the engine constants.
-const BONE_RATE            = 0.43; // %/month — hip, with exercise countermeasures (Leblanc et al. 2007)
-const BONE_RATE_CENTRIFUGE = 0.15; // %/month — illustrative estimate for an artificial-gravity habitat
+// No bone-loss percentage is shown: the engine's crew-health index only uses zero-g time (see mission.js).
 
 /* Display metadata for the reference fleet (numbers come from the engine). */
 const FLEET_DISPLAY = {
   chemical: { label:'Chemical', shortLabel:'CHEM', engineType:'LH₂/LOX — RL10-class',
-    source:'RL10 Isp ≈ 460 s · 300 t wet stage · SLS-class launches (NASA OIG 2022 ≈ $2.2B each)' },
-  nuclear:  { label:'Nuclear Thermal', shortLabel:'NTR', engineType:'NERVA-derived NTR — LH₂',
+    source:'RL10 Isp ≈ 460 s · 300 t wet stage · assembled in LEO from launches of the selected launch vehicle' },
+  nuclear:  { label:'Nuclear Thermal', shortLabel:'NTR', engineType:'NERVA-derived NTR — LH₂ · advanced concept, never flown',
     source:'Isp 900 s (DRA 5.0 design value; ≈ 850 s demonstrated in ground tests) · same 300 t wet stage · never flown' },
   starship: { label:'Starship', shortLabel:'SHP', engineType:'Raptor Vacuum — CH₄/LOX',
     source:'Isp 380 s · 1,200 t tanks refilled in LEO by tankers · aerocapture at Mars (entry ≤ 7.5 km/s, est.)' },
@@ -143,22 +144,20 @@ const toDisplayRocket = (mission, vehicle, display, extra = {}) => {
   if (!mission.feasible) {
     return {
       ...base, failed: true, failReason: mission.infeasibleReason,
-      transit: 0, radiation: 0, missionDose: 0, careerRadPct: 0, boneLossPct: 0, propellant: 0,
+      transit: 0, radiation: 0, missionDose: 0, careerRadPct: 0, propellant: 0,
       imleo: 0, cost: 0, launches: 0, success: 0, crewHealth: 0, avgVelocity: 0, pathMkm: 0,
       abortDv: 0, deltaV: mission.deltaV ? round(toKmPerSecond(mission.deltaV.total), 2) : 0,
     };
   }
   const transit = round(toDays(mission.transitTime));
-  const boneRate = extra.habName === 'Centrifuge Hab' ? BONE_RATE_CENTRIFUGE : BONE_RATE;
   return {
     ...base,
     failed: false,
     failReason: null,
     transit,
-    radiation:    round(toMilliSieverts(mission.dose.transit)),
-    missionDose:  round(toMilliSieverts(mission.dose.mission), 0),
+    radiation:    round(toMilliSieverts(mission.dose.outbound)),
+    missionDose:  round(toMilliSieverts(mission.dose.total), 0),
     careerRadPct: round(mission.dose.careerFraction * 100),
-    boneLossPct:  round(transit / 30 * boneRate),
     surfaceStay:  Math.round(toDays(mission.duration.surfaceStay)),
     propellant:   Math.round(mission.mass.propellant),
     imleo:        round(toTonnes(mission.mass.initialMassInLEO), 0),
@@ -171,6 +170,8 @@ const toDisplayRocket = (mission, vehicle, display, extra = {}) => {
     avgVelocity:  round(toKmPerSecond(mission.averageSpeed), 1),
     pathMkm:      round(toMillionKm(mission.pathLength), 0),
     success:      round(mission.success.probability * 100),
+    successFactors: mission.successFactors,
+    launchVehicleName: mission.launchVehicle.name,
     crewHealth:   round(mission.crewHealthIndex, 0),
     mission,
   };
@@ -206,11 +207,11 @@ const computePlayerStats = (parts, params) => {
   if (eng.electric) {
     // Impulsive-burn patched conics do not apply to months-long low-thrust spirals.
     const mission = { feasible: false, departureDate: params.window.departureDate, deltaV: null,
-      infeasibleReason: `ELECTRIC DRIVE — ${eng.thrust} kN of thrust cannot perform the impulsive burns this crewed transfer model assumes` };
+      infeasibleReason: `ELECTRIC DRIVE — ${fmtThrust(eng.thrust)} of thrust cannot perform the impulsive burns this crewed transfer model assumes` };
     return toDisplayRocket(mission, vehicle, display, extra);
   }
   const mission = simulateMission({
-    vehicle, crewSize: params.crewSize, launchDate: params.window.departureDate,
+    vehicle, launchVehicle: params.launchVehicle, crewSize: params.crewSize, windowId: params.window.id,
     transferChoice: params.transferChoice, riskTolerance: params.risk, habitatMass: hab.dryMass,
   });
   return toDisplayRocket(mission, vehicle, display, extra);
@@ -221,8 +222,10 @@ const simulateFleet = (params) => {
   const out = {};
   VEHICLE_IDS.forEach((id) => {
     const vehicle = VEHICLES[id];
+    // The Starship stage only flies on the Starship launcher (it is that launcher's upper stage).
+    const launchVehicle = vehicle.launchMode === 'tanker' ? vehicle.defaultLaunchVehicle : params.launchVehicle;
     const mission = simulateMission({
-      vehicle, crewSize: params.crewSize, launchDate: params.window.departureDate,
+      vehicle, launchVehicle, crewSize: params.crewSize, windowId: params.window.id,
       transferChoice: params.transferChoice, riskTolerance: params.risk,
     });
     out[id] = toDisplayRocket(mission, vehicle, FLEET_DISPLAY[id]);
@@ -236,14 +239,13 @@ const METRICS = [
   { key:'radiation',    label:'Transit Dose (outbound)',              unit:'mSv',   lo:true,  src:'Curiosity RAD 1.84 mSv/day · Zeitlin et al. Science 2013' },
   { key:'missionDose',  label:'Mission Dose (round trip + surface)',  unit:'mSv',   lo:true,  src:'RAD cruise + surface 0.64 mSv/day (Hassler et al. 2014)' },
   { key:'careerRadPct', label:'Career Rad. Limit Used (mission)',     unit:'%',     lo:true,  src:'NASA-STD-3001 · 600 mSv career limit' },
-  { key:'boneLossPct',  label:'Hip Bone Density Loss (outbound)',     unit:'%',     lo:true,  src:'0.43%/month with exercise (illustrative)' },
   { key:'deltaV',       label:'Δv Required (burns)',                  unit:'km/s',  lo:true,  src:'TMI from 400 km LEO + Mars capture' },
   { key:'abortDv',      label:'Spare Δv Capability',                  unit:'km/s',  lo:false, src:'Full-tank Δv − required Δv (rocket equation)' },
   { key:'propellant',   label:'Propellant Mass',                      unit:'kg',    lo:true,  src:'Tsiolkovsky rocket equation' },
   { key:'imleo',        label:'Mass in Low Earth Orbit',              unit:'t',     lo:true,  src:'Stage + crew payload + propellant' },
-  { key:'launches',     label:'Launches Required',                    unit:'×',     lo:true,  src:'Mass ÷ per-launch capacity' },
-  { key:'cost',         label:'Transportation Cost (est.)',           unit:'$B',    lo:true,  src:'Hardware + launches · estimates, see physics/README' },
-  { key:'success',      label:'Success Estimate (heuristic)',         unit:'%',     lo:false, src:'Product of per-event reliabilities — simplified' },
+  { key:'launches',     label:'Launches Required',                    unit:'×',     lo:true,  src:'ceil(mass in LEO ÷ launcher payload); Starship: ship + tankers' },
+  { key:'cost',         label:'Transportation Cost (est.)',           unit:'$B',    lo:true,  src:'Hardware + launches + expected re-flights · estimates, see physics/README' },
+  { key:'success',      label:'Success Estimate (heuristic)',         unit:'%',     lo:false, src:'Product of mission-critical factors; uncrewed launch failures are re-flown' },
   { key:'crewHealth',   label:'Crew Health Index (heuristic)',        unit:'%',     lo:false, src:'Illustrative: dose + zero-g time' },
   { key:'isp',          label:'Specific Impulse',                     unit:'s',     lo:false, src:'Engine test data / manufacturer spec' },
 ];
@@ -338,7 +340,6 @@ function BuilderPreview({ stats }) {
           <Sep label="CREW" />
           <Row label="Transit dose (1.84 mSv/d)" val={`${stats.radiation} mSv`} good={stats.radiation < 200} warn={stats.radiation > 400} />
           <Row label="Mission dose / 600 mSv limit" val={`${stats.careerRadPct}%`} good={stats.careerRadPct < 100} warn={stats.careerRadPct > 150} />
-          <Row label="Bone loss (outbound)" val={`${stats.boneLossPct}%`} good={stats.boneLossPct < 2} warn={stats.boneLossPct > 4} />
         </>
       )}
 
@@ -631,7 +632,7 @@ function CockpitView({ rocket, rocketRp, distance, hazardsHit }) {
           { x:195, label:'MISSION DAY', val:`${day} / ${rocket.transit}d`, col:'#fff'       },
           { x:330, label:'RADIATION',   val:`${adjRad} mSv`,          col:radColor(adjRad) },
           { x:460, label:'DISTANCE',    val:`${distKm}M km`,          col:'#fff'           },
-          // crewHealth is not modelled yet (Phase 1) — show a dash instead of "undefined%".
+          // crewHealth is the engine's heuristic index; a dash guards against missing values.
           { x:600, label:'CREW HEALTH', val: Number.isFinite(rocket.crewHealth) ? `${rocket.crewHealth}%` : '—',
             col: !Number.isFinite(rocket.crewHealth) ? '#fff'
               : rocket.crewHealth > 70 ? '#6edc52' : rocket.crewHealth > 50 ? '#f4ae2a' : '#ff5555' },
@@ -792,7 +793,8 @@ function TradeoffPanel({ rockets }) {
    ══════════════════════════════════════════════════════════ */
 export default function App() {
   const [crewSize,  setCrewSize]  = useState(4);
-  const [windowIndex, setWindowIndex] = useState(0); // 0 = next launch window
+  const [windowId, setWindowId] = useState(DEFAULT_WINDOW_ID); // fixed window id (shareable)
+  const [launchVehicleId, setLaunchVehicleId] = useState('sls-block1'); // lifts assembled stacks (chemical, NTR, custom)
   const [transferId,  setTransferId]  = useState('fastest');
   const [risk,      setRisk]      = useState(5);
   const [launched,  setLaunched]  = useState(false);
@@ -861,12 +863,12 @@ export default function App() {
 
   // Clear every pending race/countdown timer on unmount.
   useEffect(() => () => clearAllRaceTimers(), []);
-  const window_ = LAUNCH_WINDOWS[windowIndex] ?? LAUNCH_WINDOWS[0];
-  const year = window_.year;
+  const window_ = LAUNCH_WINDOWS.find(w => w.id === windowId) ?? LAUNCH_WINDOWS[0];
+  const year = window_.oppositionYear;
   const transferOption = TRANSFER_OPTIONS.find(o => o.id === transferId) ?? TRANSFER_OPTIONS[0];
   const missionParams = useMemo(() => ({
-    crewSize, risk, window: window_, transferChoice: transferOption.choice,
-  }), [crewSize, risk, window_, transferOption]);
+    crewSize, risk, window: window_, transferChoice: transferOption.choice, launchVehicle: launchVehicleId,
+  }), [crewSize, risk, window_, transferOption, launchVehicleId]);
 
   /* ── All rockets (fleet + optional player), simulated by the physics engine ── */
   const rockets = useMemo(() => {
@@ -1338,19 +1340,39 @@ export default function App() {
                   <span className="control-value">{crewSize}</span>
                 </div>
                 <span className="control-hint">
-                  {crewSize} crew · {((CREW_PAYLOAD.habitatBaseMass + CREW_PAYLOAD.habitatMassPerCrew * crewSize) / 1000).toFixed(1)} t habitat · {CREW_PAYLOAD.consumablesPerCrewDay} kg consumables per crew-day
+                  {crewSize} crew · {((CREW_PAYLOAD.habitatBaseMass + CREW_PAYLOAD.habitatMassPerCrew * crewSize) / 1000).toFixed(1)} t habitat · {CONSUMABLES_PER_CREW_DAY.toFixed(2)} kg consumables per crew-day (NASA BVAD, with ISS-class recycling)
                 </span>
               </div>
               <div className="control">
                 <label className="control-label" htmlFor="launch-window">LAUNCH WINDOW</label>
-                <select id="launch-window" value={windowIndex} onChange={e => setWindowIndex(+e.target.value)}>
-                  {LAUNCH_WINDOWS.map((w, i) => (
-                    <option key={w.departureDate.toISOString()} value={i}>
-                      {w.year} — departs ~{fmtDate(w.departureDate)} · min-energy {Math.round(toDays(w.timeOfFlight))} d{i === 0 ? ' (next)' : ''}
+                <select id="launch-window" value={window_.id} onChange={e => setWindowId(e.target.value)}>
+                  {LAUNCH_WINDOWS.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.label} — departs {fmtMonth(w.departureDate)} · min-energy {Math.round(toDays(w.hohmannTimeOfFlight))} d
                     </option>
                   ))}
                 </select>
-                <span className="control-hint">Windows repeat every ~26 months. Mars' eccentric orbit makes some windows faster or cheaper than others.</span>
+                <span className="control-hint">
+                  Named by the Mars opposition each window leads up to; departure is 2–4 months earlier (window id {window_.id}).
+                  Windows repeat every ~26 months, and Mars' eccentric orbit makes some cheaper than others.
+                </span>
+              </div>
+              <div className="control">
+                <label className="control-label" htmlFor="launch-vehicle">LAUNCH VEHICLE</label>
+                <select id="launch-vehicle" value={launchVehicleId} onChange={e => setLaunchVehicleId(e.target.value)}>
+                  {LAUNCH_VEHICLE_IDS.map(id => {
+                    const lv = LAUNCH_VEHICLES[id];
+                    return (
+                      <option key={id} value={id}>
+                        {lv.name} — {(lv.payloadLeoKg / 1000).toFixed(1)} t to LEO{lv.status !== 'operational' ? ` (${lv.status})` : ''}
+                      </option>
+                    );
+                  })}
+                </select>
+                <span className="control-hint">
+                  Lifts the chemical, nuclear and custom stacks (launches = mass in LEO ÷ payload, rounded up). The Starship
+                  stage always flies on Starship with tanker refuelling. {LAUNCH_VEHICLES[launchVehicleId].source}.
+                </span>
               </div>
               <div className="control">
                 <label className="control-label" htmlFor="transfer-strategy">TRANSFER STRATEGY</label>
@@ -1411,6 +1433,17 @@ export default function App() {
                           <div className="csg-item"><span className="csg-l">SUCCESS (HEUR.)</span><span className="csg-v" style={{color:r.color}}>{r.success}%</span></div>
                         </div>
                       )}
+                      {!r.failed && r.successFactors && (
+                        <details className="success-factors" style={{fontSize:'0.62rem', color:'#aaa', marginTop:'8px', lineHeight:1.5}}>
+                          <summary style={{cursor:'pointer'}}>Why {r.success}% success? · launched on {r.launchVehicleName}</summary>
+                          <ul style={{paddingLeft:'16px', margin:'4px 0'}}>
+                            {r.successFactors.filter(f => f.probability < 1).map(f => (
+                              <li key={f.id}><strong>{f.label}: {(f.probability * 100).toFixed(1)}%</strong> — {f.explanation}</li>
+                            ))}
+                          </ul>
+                          <div>Failed uncrewed launches are re-flown: they add expected cost, not mission loss.</div>
+                        </details>
+                      )}
                       <div style={{fontSize:'0.52rem', color:'#4a2515', marginTop:'8px', lineHeight:'1.5', fontFamily:'Share Tech Mono'}}>
                         {r.source}
                       </div>
@@ -1453,7 +1486,7 @@ export default function App() {
                           <div className="csg-item"><span className="csg-l">Δv REQUIRED</span><span className="csg-v" style={{color:sc.failed?'#ff5555':playerRocket.color}}>{sc.deltaV} km/s</span></div>
                           <div className="csg-item"><span className="csg-l">TRANSIT DOSE</span><span className="csg-v" style={{color:sc.failed?'#ff5555':radColor(sc.radiation)}}>{sc.failed?'—':`${sc.radiation} mSv`}</span></div>
                           <div className="csg-item"><span className="csg-l">SPARE ΔV</span><span className="csg-v" style={{color:sc.failed?'#ff5555':sc.abortDv>2?'#6edc52':'#f4ae2a'}}>{sc.failed?'—':`${sc.abortDv} km/s`}</span></div>
-                          <div className="csg-item"><span className="csg-l">BONE LOSS</span><span className="csg-v" style={{color:playerRocket.color}}>{sc.failed?'—':`${sc.boneLossPct}%`}</span></div>
+                          <div className="csg-item"><span className="csg-l">MISSION DOSE</span><span className="csg-v" style={{color:playerRocket.color}}>{sc.failed?'—':`${sc.careerRadPct}% of limit`}</span></div>
                           <div className="csg-item"><span className="csg-l">ENGINE</span><span className="csg-v" style={{color:playerRocket.color, fontSize:'0.62rem'}}>{playerRocket.engineName}</span></div>
                           <div className="csg-item"><span className="csg-l">HAB</span><span className="csg-v" style={{color:playerRocket.color, fontSize:'0.62rem'}}>{playerRocket.habName}</span></div>
                         </>
@@ -1563,7 +1596,7 @@ export default function App() {
                               </div>
                               <div className="pcs-item">
                                 <span className="pcs-label">Thrust</span>
-                                <span className="pcs-val">{eng.thrust>=1000?`${(eng.thrust/1000).toFixed(1)}MN`:`${eng.thrust}kN`}</span>
+                                <span className="pcs-val">{fmtThrust(eng.thrust)}</span>
                               </div>
                               <div className="pcs-item">
                                 <span className="pcs-label">TRL</span>
@@ -1641,7 +1674,7 @@ export default function App() {
                   {builderSection === 'hab' && (
                     <div>
                       <div style={{fontSize:'0.6rem', color:'#6a3020', marginBottom:'8px', fontFamily:'Share Tech Mono'}}>
-                        Habitat mass adds to dry mass. Heavier hab = more ΔV needed. Centrifuge prevents bone/muscle loss on long transits.
+                        Habitat mass adds to dry mass. Heavier hab = more ΔV needed. A centrifuge is expected to reduce bone/muscle loss on long transits.
                       </div>
                       <div className="part-cards-grid" style={{gridTemplateColumns:'repeat(auto-fill, minmax(190px, 1fr))'}}>
                         {HAB_OPTIONS.map(hab => (
@@ -2485,7 +2518,7 @@ export default function App() {
                     <span style={{color:racedRockets.player.color, fontWeight:700}}>{racedRockets.player.label}</span>
                     {' '}(custom) —{' '}
                     transit {racedRockets.player.transit}d · radiation {racedRockets.player.radiation} mSv ·
-                    ΔV {racedRockets.player.deltaV} km/s · bone loss {racedRockets.player.boneLossPct}% ·
+                    ΔV {racedRockets.player.deltaV} km/s · mission dose {racedRockets.player.careerRadPct}% of limit ·
                     spare ΔV {racedRockets.player.abortDv} km/s · cost ${racedRockets.player.cost}B ·
                     mass in LEO {racedRockets.player.imleo}t
                     <span style={{color:'#555', display:'block', marginTop:'4px', fontSize:'0.6rem'}}>
@@ -2574,8 +2607,8 @@ export default function App() {
                       NASA NSSDC planetary fact sheets (μ, radii, orbits) · JPL/Standish Keplerian elements (planet positions) ·
                       NASA DRA 5.0, NASA-SP-2009-566 (capture orbit, NTR Isp 900 s) · Rover/NERVA ground tests (≈ 850 s) ·
                       Aerojet Rocketdyne RL10 (Isp ≈ 460 s) · SpaceX Starship (1,200 t, Raptor Vac ≈ 380 s) ·
-                      NASA OIG IG-22-003 (SLS ≈ $2.2B/launch) · Curiosity RAD: Zeitlin et al. 2013 (1.84 mSv/day cruise),
-                      Hassler et al. 2014 (0.64 mSv/day surface) · NASA-STD-3001 (600 mSv career limit) · NASA BVAD (consumables) ·
+                      NASA OIG IG-22-003 (SLS ≈ $2.2B/launch) · NASA SLS fact sheets (Block 1 95 t, Block 2 130 t to LEO) · SpaceX Falcon Heavy (63.8 t) · Blue Origin New Glenn (45 t) · Curiosity RAD: Zeitlin et al. 2013 (1.84 mSv/day cruise),
+                      Hassler et al. 2014 (0.64 mSv/day surface) · NASA-STD-3001 (600 mSv career limit) · NASA BVAD Rev2, NASA/TP-2015-218570 Tables 3-31 & 4-20 (food, water, O₂) · NASA ISS ECLSS water recovery (93–98%) ·
                       Tsiolkovsky 1903 · NASA NSSDC (Moon 27.3d/384,400km · Phobos 7.66h/9,376km · Deimos 30.3h/23,458km) ·
                       NASA ISS (period 92.68 min · altitude 408 km) · ESA Space Debris Report 2024 · JPL CNEOS 2024 · Grün et al. 1985
                     </div>

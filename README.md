@@ -1,6 +1,6 @@
 # Mars Mission Control
 
-Fullstack prototype implementing the design in `mars-mission-brief.md`.
+Fullstack prototype. The original brief is archived in `docs/archive/mars-mission-brief.md` (superseded: every vehicle now flies the same mission and the physics engine in `frontend/src/physics/` decides).
 
 ## Stack
 - Frontend: React + Vite + Axios

@@ -1,9 +1,17 @@
 /**
- * Vehicle definitions for the three reference architectures.
+ * In-space propulsion stages for the three reference architectures.
  *
  * Every vehicle carries the same crew payload (habitat, crew, consumables),
  * which mission.js adds on top of `stageDryMass`. Only the propulsion
  * differs. All three are fuelled in low Earth orbit (LEO) before departure.
+ *
+ * A stage is lifted to LEO by a launch vehicle (launchVehicles.js):
+ *   - launchMode 'assembled' (chemical, nuclear, custom): the whole stack is
+ *     split across ceil(stack mass / launcher payload) launches of any
+ *     launcher and docked in LEO.
+ *   - launchMode 'tanker' (Starship): the ship launches on Super Heavy with the
+ *     crew payload, then Starship tankers refill it. Only the Starship
+ *     launcher is compatible.
  *
  * Numbers marked ESTIMATE are not published by any program. They are the
  * author's engineering estimates, chosen to fall within the range of public
@@ -23,23 +31,10 @@
  *           engines, Isp ≈ 900 s assumed.
  *   [NERVA] Rover/NERVA ground tests 1955–1972 demonstrated ≈ 825–850 s
  *           (e.g. Pewee, NRX/XE). No NTR has flown.
- *   [SLS]   NASA SLS reference: Block 1B ≈ 105 t to LEO.
- *   [OIG22] NASA OIG IG-22-003 (2022): SLS production + operations
- *           ≈ $2.2 B per launch (excluding Orion and ground systems).
- *   [SPX]   SpaceX Starship page / user's guide: ≈ 1,200 t propellant,
- *           100+ t payload, Raptor Vacuum Isp ≈ 380 s.
- */
-
-/**
- * @typedef {object} LaunchArchitecture
- * @property {'assembled'|'tanker'} mode
- *   'assembled': the whole stack (stage + propellant + payload) is lifted by
- *   heavy-lift launches and docked in LEO.
- *   'tanker': the ship launches with the crew payload, and tanker flights
- *   then refill its propellant in LEO.
- * @property {string} name             Launcher name, for display.
- * @property {number} capacityPerLaunch Mass delivered to LEO per launch [kg] (for 'tanker' this is propellant per tanker).
- * @property {number} costPerLaunch    [USD].
+ *   [SPX]   SpaceX Starship page / user's guide: ≈ 1,200 t propellant in the
+ *           ship, Raptor Vacuum Isp ≈ 380 s.
+ * Launch-vehicle figures (payload to LEO, cost per launch) live in
+ * launchVehicles.js with their own sources.
  */
 
 /**
@@ -53,7 +48,9 @@
  * @property {'propulsive'|'aerocapture'} marsCapture How the vehicle stops at Mars.
  * @property {number} [maxEntrySpeed]     For aerocapture, the heat-shield entry-speed limit [m/s].
  * @property {number} gcrShieldingFactor  Multiplier on the deep-space GCR dose rate (1 = MSL-like shielding).
- * @property {LaunchArchitecture} launch
+ * @property {'assembled'|'tanker'} launchMode How the stack reaches LEO (see file header).
+ * @property {string} defaultLaunchVehicle Launch-vehicle id used when none is chosen.
+ * @property {string[]|null} compatibleLaunchVehicles Allowed launch-vehicle ids, or null for any.
  * @property {number} hardwareCost        Production cost of the propulsion hardware, excluding development [USD].
  * @property {number} trl                 Technology Readiness Level of the propulsion system (1–9).
  * @property {number} burnReliability     Heuristic probability that each major burn succeeds.
@@ -63,11 +60,11 @@
  * @property {string[]} notes             Plain-language caveats shown in the README/UI.
  */
 
-const SLS_CLASS = Object.freeze({
-  mode: 'assembled',
-  name: 'SLS Block 1B-class heavy lift',
-  capacityPerLaunch: 105_000, // [SLS]
-  costPerLaunch: 2.2e9, // [OIG22]
+/** Launch settings for stacks assembled in LEO from several launches (any launcher). */
+const ASSEMBLED = Object.freeze({
+  launchMode: 'assembled',
+  defaultLaunchVehicle: 'sls-block1',
+  compatibleLaunchVehicles: null,
 });
 
 /** @type {Readonly<Record<string, Vehicle>>} */
@@ -83,7 +80,7 @@ export const VEHICLES = Object.freeze({
     propellantCapacity: 270_000, // 300 t wet stage (fairness rule above)
     marsCapture: 'propulsive',
     gcrShieldingFactor: 1.0,
-    launch: SLS_CLASS,
+    ...ASSEMBLED,
     hardwareCost: 1.0e9, // ESTIMATE
     trl: 9, // engines flight-proven; months-long LH₂ storage is not
     burnReliability: 0.99, // heuristic, flight-proven engines
@@ -96,7 +93,7 @@ export const VEHICLES = Object.freeze({
 
   nuclear: Object.freeze({
     id: 'nuclear',
-    name: 'Nuclear Thermal (NTR)',
+    name: 'Nuclear Thermal (advanced concept, never flown)',
     engine: 'NERVA-derived solid-core NTR, LH₂ propellant',
     isp: 900, // [DRA5] design assumption; [NERVA] demonstrated ≈ 850 s on the ground
     // ESTIMATE: three ~3.5 t engines with internal shields, external
@@ -106,7 +103,7 @@ export const VEHICLES = Object.freeze({
     propellantCapacity: 230_000,
     marsCapture: 'propulsive',
     gcrShieldingFactor: 1.0, // shadow shields block the reactor, not cosmic rays
-    launch: SLS_CLASS,
+    ...ASSEMBLED,
     hardwareCost: 3.0e9, // ESTIMATE; excludes reactor development (several $B)
     trl: 5, // ground-tested 1960s–70s, never flown
     burnReliability: 0.95, // heuristic, no flight heritage
@@ -130,12 +127,9 @@ export const VEHICLES = Object.freeze({
     // not demonstrated at Mars.
     maxEntrySpeed: 7_500,
     gcrShieldingFactor: 1.0,
-    launch: Object.freeze({
-      mode: 'tanker',
-      name: 'Starship tanker flights',
-      capacityPerLaunch: 150_000, // ESTIMATE: propellant delivered per tanker flight
-      costPerLaunch: 150e6, // ESTIMATE: current-era cost; SpaceX's long-term target is far lower
-    }),
+    launchMode: 'tanker',
+    defaultLaunchVehicle: 'starship',
+    compatibleLaunchVehicles: Object.freeze(['starship']),
     hardwareCost: 0.2e9, // ESTIMATE
     trl: 7,
     burnReliability: 0.97, // heuristic, in-space Raptor relights only briefly demonstrated
@@ -154,7 +148,7 @@ export const VEHICLE_IDS = Object.freeze(['chemical', 'nuclear', 'starship']);
 
 /**
  * Builds a vehicle from custom parts (used by the "build your rocket" UI).
- * Uses the SLS-class assembled-in-LEO architecture and propulsive capture.
+ * Uses the assembled-in-LEO architecture (any launcher) and propulsive capture.
  * @param {object} p
  * @param {string} p.name
  * @param {number} p.isp               [s]
@@ -181,7 +175,7 @@ export function createCustomVehicle({ name, isp, stageDryMass, propellantCapacit
     propellantCapacity,
     marsCapture: 'propulsive',
     gcrShieldingFactor,
-    launch: SLS_CLASS,
+    ...ASSEMBLED,
     hardwareCost: 2.0e9, // ESTIMATE, flat placeholder for custom builds
     trl,
     burnReliability: burnReliability ?? 0.99 - 0.01 * (9 - trl),

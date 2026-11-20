@@ -1,28 +1,33 @@
 /**
- * Mission model: flies one vehicle from LEO to Mars orbit in a real launch
- * window and reports transit time, Δv, propellant, launches, cost,
- * radiation, and simple success/health indicators.
+ * Mission model: flies one in-space stage, lifted to LEO by a chosen launch
+ * vehicle, from LEO to Mars in a real launch window, and reports transit
+ * time, Δv, propellant, launches, cost, radiation, life support, success
+ * factors, seeded gameplay events and a score.
  *
  * What is modelled with physics:
- *   - Launch-window phasing on Mars' real eccentric orbit (ephemeris.js)
+ *   - Launch-window phasing on Mars' real eccentric orbit (ephemeris.js, windows.js)
  *   - Heliocentric transfer: minimum-energy, or faster tangential-departure
  *     transfers that trade Δv for time (orbits.js)
  *   - Patched-conic burns: Earth departure from 400 km LEO, then Mars capture
  *     into the DRA 5.0 1-sol ellipse (or aerocapture with an entry-speed cap)
  *   - Propellant via the rocket equation, and launch counts (rocket.js)
  *   - Radiation dose from measured Curiosity/RAD dose rates × time
+ *   - Life-support consumables from NASA BVAD rates (lifeSupport.js)
  *
- * What is a documented HEURISTIC, not rigorous engineering:
- *   - successProbability: product of per-event reliabilities (see below)
+ * What is a documented HEURISTIC or GAMEPLAY model, not rigorous engineering:
+ *   - success probability and its factors (success.js)
  *   - crewHealthIndex: illustrative 0–100 score from dose and zero-g time
+ *   - in-flight events (events.js) and the score (scoring.js)
  *
  * Scope: the propulsive model covers the crewed outbound leg. The return
  * leg is assumed to be a mirror-image transfer. It counts toward mission
- * duration and radiation dose, but its propulsion is not sized: as in
- * NASA DRA 5.0, the return vehicle/propellant is assumed pre-deployed or made
- * on Mars (ISRU).
+ * duration, radiation dose and life support, but its propulsion is not
+ * sized: as in NASA DRA 5.0, the return vehicle/propellant is assumed
+ * pre-deployed or made on Mars (ISRU).
  *
- * All inputs/outputs are SI (m, s, kg, m/s, Sv, USD). Dates are Date objects.
+ * Inputs and outputs are SI (m, s, kg, m/s, Sv, USD). Output dates are ISO
+ * 8601 strings, so the result is plain JSON (the Python mirror returns the
+ * same keys).
  */
 import {
   DAY, MU_EARTH, MU_MARS, R_EARTH, R_MARS, LEO_ALTITUDE,
@@ -33,43 +38,58 @@ import { departureBurnDeltaV, captureBurnDeltaV, maxVInfForEntrySpeed, transferA
 import { solveTransferWindow, conjunctionStayTime } from './ephemeris.js';
 import { propellantForDeltaV, maxDeltaV, launchesRequired } from './rocket.js';
 import { VEHICLES } from './vehicles.js';
+import { getLaunchVehicle, launchCompatibility } from './launchVehicles.js';
+import { lifeSupportMass, dailyConsumables, DEFAULT_CLOSURE, CONTINGENCY_DAYS, LIFE_SUPPORT_CREW_RANGE } from './lifeSupport.js';
+import { getWindow, DEFAULT_WINDOW_ID, BEST_WINDOW_ID } from './windows.js';
+import { scheduleEvents, summarizeEvents } from './events.js';
+import { successEstimate } from './success.js';
+import { scoreMission } from './scoring.js';
+import { validateSeed } from './rng.js';
+
+/** Output format version (bump when keys change; the Python mirror checks it). */
+export const MISSION_SCHEMA_VERSION = 2;
 
 /* ── Common crew payload (identical for every vehicle) ──────────────────── */
 
 /**
- * Crew payload assumptions. ESTIMATES, cross-checked against:
- *  - DRA 5.0 transit habitat ≈ 40 t class for 6 crew → 15 t + 4.5 t/crew = 42 t at 6.
- *  - NASA Baseline Values and Assumptions Document (BVAD, NASA/TP-2015-218570):
- *    food ≈ 1.8 kg/crew-day with packaging; with partly closed-loop water and
- *    O₂ recovery, ≈ 5 kg/crew-day of consumables and spares is a round planning value.
+ * Crew payload assumptions (ESTIMATES), cross-checked against the DRA 5.0
+ * transit habitat (≈ 40 t class for 6 crew → 15 t + 4.5 t/crew = 42 t at 6).
+ * The habitat allowance includes life-support hardware and spares.
+ * Consumables come from lifeSupport.js (NASA BVAD rates with recycling):
+ * outbound transit + CONTINGENCY_DAYS. The surface and return consumables
+ * are reported in `lifeSupport` but assumed pre-deployed with the return
+ * vehicle (DRA 5.0), so they are not carried by the outbound stage.
  */
 export const CREW_PAYLOAD = Object.freeze({
   habitatBaseMass: 15_000, // kg
   habitatMassPerCrew: 4_500, // kg/person
   crewMassPerPerson: 100, // kg/person (body + personal kit)
-  consumablesPerCrewDay: 5.0, // kg/(person·day)
-  contingencyDays: 30, // extra days of consumables carried on the outbound leg
+  contingencyDays: CONTINGENCY_DAYS, // extra days of consumables carried on the outbound leg
 });
 
-/** Allowed crew sizes (integer). */
-export const CREW_SIZE_RANGE = Object.freeze({ min: 1, max: 12 });
+/** Closed-loop transit consumables per crew-day with default recycling [kg] (for display). */
+export const CONSUMABLES_PER_CREW_DAY = dailyConsumables('transit', DEFAULT_CLOSURE).closedLoop;
+
+/** Allowed crew sizes (integer 2–8, the range BVAD-based life support is scaled for). */
+export const CREW_SIZE_RANGE = LIFE_SUPPORT_CREW_RANGE;
 
 /**
  * Crew payload mass for the outbound leg.
  * @param {object} p
- * @param {number} p.crewSize      Number of crew (integer ≥ 1).
+ * @param {number} p.crewSize      Number of crew (integer 2–8).
  * @param {number} p.transitTime   Outbound transit time [s].
  * @param {number} [p.habitatMass] Override the habitat mass [kg] (custom builds).
+ * @param {{water:number, oxygen:number}} [p.closure] Recycling closure (default ISS-class).
  * @returns {{habitat:number, crew:number, consumables:number, total:number}} Masses [kg].
  */
-export function crewPayloadMass({ crewSize, transitTime, habitatMass }) {
+export function crewPayloadMass({ crewSize, transitTime, habitatMass, closure = DEFAULT_CLOSURE }) {
   validateCrewSize(crewSize);
   if (!(transitTime > 0)) throw new RangeError('transitTime must be positive');
   const P = CREW_PAYLOAD;
   const habitat = habitatMass ?? P.habitatBaseMass + P.habitatMassPerCrew * crewSize;
   if (!(habitat > 0)) throw new RangeError('habitatMass must be positive');
   const crew = P.crewMassPerPerson * crewSize;
-  const consumables = P.consumablesPerCrewDay * crewSize * (transitTime / DAY + P.contingencyDays);
+  const consumables = lifeSupportMass({ crewSize, outboundTime: transitTime, closure }).outbound.closedLoop;
   return { habitat, crew, consumables, total: habitat + crew + consumables };
 }
 
@@ -85,45 +105,14 @@ export function deltaVMargin(riskTolerance) {
   return 0.12 - ((riskTolerance - 1) / 9) * 0.1;
 }
 
-/* ── Heuristic reliability and health models ────────────────────────────── */
-
-/** Heuristic probability that any single launch succeeds (modern operational launchers ≈ 0.98–0.99+). */
-export const LAUNCH_RELIABILITY = 0.99;
-
-/**
- * Heuristic success probability. It multiplies independent per-event
- * probabilities:
- *   P = p_launch^launches × p_op^(launches−1) × p_burn^burns × p_aero × p_margin,
- *   p_margin = 1 − 0.10·exp(−margin / 0.04)
- * The margin term means thin Δv reserves leave less room for dispersions or
- * engine underperformance.
- * Assumes every launch and docking must succeed within the window (no spares),
- * which penalises architectures with many launches.
- * @param {object} p
- * @param {import('./vehicles.js').Vehicle} p.vehicle
- * @param {number} p.launches Total launches.
- * @param {number} p.burns    Major propulsive burns (TMI, MOI).
- * @param {number} p.margin   Fractional Δv margin.
- * @returns {{probability:number, factors:Record<string, number>}}
- */
-export function successEstimate({ vehicle, launches, burns, margin }) {
-  const factors = {
-    launches: LAUNCH_RELIABILITY ** launches,
-    orbitalOperations: vehicle.operationReliability ** Math.max(0, launches - 1),
-    propulsion: vehicle.burnReliability ** burns,
-    aerocapture: vehicle.marsCapture === 'aerocapture' ? (vehicle.aerocaptureReliability ?? 1) : 1,
-    deltaVMargin: 1 - 0.1 * Math.exp(-margin / 0.04),
-  };
-  const probability = Object.values(factors).reduce((p, f) => p * f, 1);
-  return { probability, factors };
-}
-
 /**
  * Illustrative crew-health index (0–100). NOT a medical model:
  *   100 − 25 × (mission dose / 600 mSv career limit) − 1 × (months in zero-g)
- * It just shows the direction of two real effects: radiation (cancer risk)
- * and weightlessness (bone/muscle loss, roughly ~1%/month of hip bone density
- * without countermeasures).
+ * It only shows the direction of two real effects: radiation (cancer risk)
+ * and weightlessness (bone and muscle loss; LeBlanc et al., J. Musculoskelet.
+ * Neuronal Interact. 1(2):157–160, 2000, measured ≈ 1.0–1.6 % per month hip
+ * bone-density loss on long Mir flights). The UI does not show a bone-loss
+ * percentage.
  * @param {object} p
  * @param {number} p.missionDose      [Sv]
  * @param {number} p.microgravityTime Time spent weightless [s].
@@ -155,18 +144,28 @@ function resolveVehicle(vehicle) {
   return v;
 }
 
-function resolveLaunchDate({ launchDate, launchYear }) {
+/**
+ * Picks the date to search for a window from. Precedence: windowId, then
+ * launchDate, then launchYear, then DEFAULT_WINDOW_ID.
+ * @returns {{nearDate: Date, windowId: string|null}}
+ */
+function resolveLaunch({ windowId, launchDate, launchYear }) {
+  if (windowId !== undefined && windowId !== null) {
+    const w = getWindow(windowId);
+    return { nearDate: new Date(w.departureDate), windowId: w.id };
+  }
   if (launchDate !== undefined) {
     if (!(launchDate instanceof Date) || Number.isNaN(launchDate.getTime())) throw new TypeError('launchDate must be a valid Date');
-    return launchDate;
+    return { nearDate: launchDate, windowId: null };
   }
   if (launchYear !== undefined) {
     if (!Number.isInteger(launchYear) || launchYear < 1900 || launchYear > 2100) {
       throw new RangeError('launchYear must be an integer 1900–2100 (orbital elements are valid ~1800–2050)');
     }
-    return new Date(Date.UTC(launchYear, 6, 1));
+    return { nearDate: new Date(Date.UTC(launchYear, 6, 1)), windowId: null };
   }
-  throw new TypeError('Provide launchDate (Date near the desired window) or launchYear');
+  const w = getWindow(DEFAULT_WINDOW_ID);
+  return { nearDate: new Date(w.departureDate), windowId: w.id };
 }
 
 /* ── The simulation ─────────────────────────────────────────────────────── */
@@ -181,60 +180,51 @@ function resolveLaunchDate({ launchDate, launchYear }) {
  */
 
 /**
- * @typedef {object} MissionResult
- * @property {string} vehicleId
- * @property {boolean} feasible
- * @property {string|null} infeasibleReason
- * @property {TransferChoice} transferChoice
- * @property {Date} departureDate
- * @property {Date} arrivalDate
- * @property {number} transitTime          Outbound time of flight [s].
- * @property {number} hohmannTransitTime   Minimum-energy transit in this window, for reference [s].
- * @property {number} transferAngle        [rad]
- * @property {number} pathLength           Distance flown along the heliocentric arc [m].
- * @property {number} averageSpeed         pathLength / transitTime, heliocentric [m/s].
- * @property {number} vInfDeparture        [m/s]
- * @property {number} vInfArrival          [m/s]
- * @property {{departure:number, capture:number, total:number, planned:number, capability:number, reserve:number, margin:number}} deltaV
- *   [m/s] except margin (fraction). planned = total × (1 + margin);
- *   capability = Δv with full tanks; reserve = capability − total.
- * @property {{habitat:number, crew:number, consumables:number, payload:number, stageDry:number, dry:number, propellant:number, initialMassInLEO:number}} mass [kg]
- * @property {number} launches
- * @property {{hardware:number, launches:number, total:number}} cost [USD]
- * @property {{transit:number, surface:number, return:number, mission:number, careerFraction:number}} dose [Sv]; careerFraction = mission / 600 mSv.
- * @property {{outbound:number, surfaceStay:number, return:number, total:number}} duration [s]
- * @property {number} consumablesPerCrewDay [kg]
- * @property {number} missionConsumablesMass Consumables for the whole round trip, for reference (not all carried by this vehicle) [kg].
- * @property {{probability:number, factors:Record<string, number>}} success  Heuristic.
- * @property {number} crewHealthIndex 0–100, heuristic.
- */
-
-/**
- * Simulates a crewed Earth→Mars transfer for one vehicle.
+ * Simulates a crewed Earth→Mars mission for one in-space stage.
+ *
+ * See README.md for the full output shape. Main keys: inputs, vehicle,
+ * launchVehicle, feasible, departureDate, transitTime, deltaV, mass,
+ * launches, launchPlan, cost, duration, dose, lifeSupport, success,
+ * successFactors, crewHealthIndex, events, eventSummary, score.
  *
  * @param {object} p
- * @param {string|import('./vehicles.js').Vehicle} p.vehicle Vehicle id ('chemical' | 'nuclear' | 'starship') or a vehicle object.
- * @param {number} [p.crewSize=4]       Integer 1–12.
+ * @param {string|import('./vehicles.js').Vehicle} p.vehicle Stage id ('chemical' | 'nuclear' | 'starship') or a vehicle object.
+ * @param {string} [p.launchVehicle]    Launch-vehicle id; defaults to the stage's defaultLaunchVehicle.
+ * @param {number} [p.crewSize=4]       Integer 2–8.
+ * @param {string} [p.windowId]         Fixed window id from windows.js (e.g. '2028-12'). Takes precedence over dates.
  * @param {Date}   [p.launchDate]       A date near the desired launch window (the closest window within ±390 days is used).
  * @param {number} [p.launchYear]       Alternative to launchDate: uses 1 July of that year as the search start.
+ *   With no windowId/launchDate/launchYear, DEFAULT_WINDOW_ID is used.
  * @param {TransferChoice} [p.transferChoice={kind:'fastest'}]
  * @param {number} [p.riskTolerance=5]  1 (conservative, 12% Δv margin) … 10 (aggressive, 2%).
  * @param {number} [p.habitatMass]      Override the common habitat mass [kg] (custom builds).
- * @returns {MissionResult}
+ * @param {number|null} [p.seed=null]   uint32 seed for gameplay events; null = no events (nominal flight).
+ * @param {{water:number, oxygen:number}} [p.closure] Life-support recycling closure (default ISS-class).
+ * @returns {object} MissionResult (plain JSON).
+ * @throws {RangeError} For out-of-range inputs or a launch vehicle that cannot lift this stage.
  */
 export function simulateMission({
   vehicle: vehicleInput,
+  launchVehicle: launchVehicleInput,
   crewSize = 4,
+  windowId: windowIdInput,
   launchDate,
   launchYear,
   transferChoice = { kind: 'fastest' },
   riskTolerance = 5,
   habitatMass,
+  seed = null,
+  closure = DEFAULT_CLOSURE,
 } = {}) {
   const vehicle = resolveVehicle(vehicleInput);
   validateCrewSize(crewSize);
   validateRisk(riskTolerance);
-  const nearDate = resolveLaunchDate({ launchDate, launchYear });
+  if (seed !== null) validateSeed(seed);
+  const launchVehicleId = launchVehicleInput ?? vehicle.defaultLaunchVehicle;
+  const launchVehicle = getLaunchVehicle(launchVehicleId);
+  const compat = launchCompatibility(vehicle, launchVehicleId);
+  if (!compat.ok) throw new RangeError(compat.reason);
+  const { nearDate, windowId } = resolveLaunch({ windowId: windowIdInput, launchDate, launchYear });
   const kind = transferChoice?.kind;
   if (!['fastest', 'hohmann', 'timeOfFlight'].includes(kind)) {
     throw new TypeError("transferChoice.kind must be 'fastest', 'hohmann' or 'timeOfFlight'");
@@ -266,7 +256,7 @@ export function simulateMission({
       : 0;
     const total = departure + capture;
     const planned = total * (1 + margin);
-    const payload = crewPayloadMass({ crewSize, transitTime: w.timeOfFlight, habitatMass });
+    const payload = crewPayloadMass({ crewSize, transitTime: w.timeOfFlight, habitatMass, closure });
     const dry = vehicle.stageDryMass + payload.total;
     const propellant = propellantForDeltaV(planned, dry, vehicle.isp);
     const capability = maxDeltaV(vehicle.isp, dry, vehicle.propellantCapacity);
@@ -279,6 +269,8 @@ export function simulateMission({
     return { w, departure, capture, total, planned, payload, dry, propellant, capability, reason };
   };
 
+  const ctx = { vehicle, launchVehicle, transferChoice, crewSize, riskTolerance, seed, windowId, margin, habitatMass, closure };
+
   // The minimum-energy transfer anchors the window and serves as a reference.
   const hohmann = evaluate({ kind: 'hohmann' }, nearDate);
   if (!hohmann) throw new RangeError('Could not solve the launch window for this date');
@@ -290,7 +282,7 @@ export function simulateMission({
   } else if (kind === 'timeOfFlight') {
     chosen = evaluate({ kind: 'timeOfFlight', timeOfFlight: transferChoice.timeOfFlight }, windowDate);
     if (!chosen) {
-      return infeasibleResult(vehicle, transferChoice, hohmann,
+      return infeasibleResult(ctx, hohmann,
         `A ${(transferChoice.timeOfFlight / DAY).toFixed(0)}-day transfer is outside the range this model can fly in this window ` +
         `(must be faster than the ${(hohmann.w.timeOfFlight / DAY).toFixed(0)}-day minimum-energy transfer)`);
     }
@@ -309,47 +301,102 @@ export function simulateMission({
       chosen = best;
     }
   }
-  if (chosen.reason) return infeasibleResult(vehicle, transferChoice, hohmann, chosen.reason, chosen);
+  if (chosen.reason) return infeasibleResult(ctx, hohmann, chosen.reason, chosen);
 
-  return buildResult({ vehicle, transferChoice, chosen, hohmann, crewSize, margin });
+  return buildResult(ctx, chosen, hohmann);
 }
 
-function launchCount(vehicle, initialMassInLEO, propellant) {
-  const { mode, capacityPerLaunch } = vehicle.launch;
-  return mode === 'tanker'
-    ? 1 + launchesRequired(propellant, capacityPerLaunch) // the ship itself + tankers
-    : launchesRequired(initialMassInLEO, capacityPerLaunch);
+/**
+ * Launch count for a stack.
+ *   assembled: ceil(mass in LEO / launcher payload)
+ *   tanker:    1 (the crewed ship) + ceil(propellant / propellant per tanker)
+ */
+function launchCount(vehicle, launchVehicle, initialMassInLEO, propellant) {
+  return vehicle.launchMode === 'tanker'
+    ? 1 + launchesRequired(propellant, launchVehicle.payloadLeoKg)
+    : launchesRequired(initialMassInLEO, launchVehicle.payloadLeoKg);
 }
 
-function buildResult({ vehicle, transferChoice, chosen, hohmann, crewSize, margin }) {
+function vehicleSummary(v) {
+  return {
+    id: v.id,
+    name: v.name,
+    isp: v.isp,
+    stageDryMass: v.stageDryMass,
+    propellantCapacity: v.propellantCapacity,
+    marsCapture: v.marsCapture,
+    gcrShieldingFactor: v.gcrShieldingFactor,
+    launchMode: v.launchMode,
+    trl: v.trl,
+    hardwareCost: v.hardwareCost,
+  };
+}
+
+function launchVehicleSummary(lv) {
+  return { id: lv.id, name: lv.name, payloadLeoKg: lv.payloadLeoKg, costPerLaunchUsd: lv.costPerLaunchUsd, status: lv.status };
+}
+
+function inputsSummary(ctx) {
+  return {
+    vehicleId: ctx.vehicle.id,
+    launchVehicleId: ctx.launchVehicle.id,
+    crewSize: ctx.crewSize,
+    riskTolerance: ctx.riskTolerance,
+    windowId: ctx.windowId,
+    seed: ctx.seed,
+    transferChoice: ctx.transferChoice.kind === 'timeOfFlight'
+      ? { kind: 'timeOfFlight', timeOfFlight: ctx.transferChoice.timeOfFlight }
+      : { kind: ctx.transferChoice.kind },
+    habitatMass: ctx.habitatMass ?? null,
+    closure: { water: ctx.closure.water, oxygen: ctx.closure.oxygen },
+  };
+}
+
+function buildResult(ctx, chosen, hohmann) {
+  const { vehicle, launchVehicle, crewSize, riskTolerance, seed, margin, closure } = ctx;
   const { w } = chosen;
   const pathLength = transferArcLength(w);
   const initialMassInLEO = chosen.dry + chosen.propellant;
-  const launches = launchCount(vehicle, initialMassInLEO, chosen.propellant);
-  const launchCost = launches * vehicle.launch.costPerLaunch;
+  const launches = launchCount(vehicle, launchVehicle, initialMassInLEO, chosen.propellant);
+  const launchCost = launches * launchVehicle.costPerLaunchUsd;
 
   const outbound = w.timeOfFlight;
   const surfaceStay = conjunctionStayTime({ transferAngle: w.transferAngle, timeOfFlight: outbound });
   const returnTime = outbound; // mirror-image return leg
-  const cruiseRate = GCR_CRUISE_DOSE_RATE * vehicle.gcrShieldingFactor;
-  const dose = {
-    transit: cruiseRate * outbound,
-    surface: MARS_SURFACE_DOSE_RATE * surfaceStay,
-    return: cruiseRate * returnTime,
-  };
-  dose.mission = dose.transit + dose.surface + dose.return;
-  dose.careerFraction = dose.mission / CAREER_DOSE_LIMIT;
-
-  const burns = vehicle.marsCapture === 'propulsive' ? 2 : 1;
   const totalDuration = outbound + surfaceStay + returnTime;
 
-  return {
+  const success = successEstimate({ vehicle, launchVehicle, launches, margin });
+
+  // Gameplay events (only with a seed). The Δv reserve is the margin carried
+  // beyond the required Δv.
+  const burns = [{ id: 'tmi', label: 'Trans-Mars injection', deltaV: chosen.departure }];
+  if (vehicle.marsCapture === 'propulsive') burns.push({ id: 'capture', label: 'Mars capture burn', deltaV: chosen.capture });
+  const events = seed === null ? [] : scheduleEvents({ seed, riskTolerance, outboundTime: outbound, surfaceTime: surfaceStay, returnTime, burns });
+  const eventSummary = summarizeEvents(events, { deltaVReserve: chosen.planned - chosen.total });
+
+  const cruiseRate = GCR_CRUISE_DOSE_RATE * vehicle.gcrShieldingFactor;
+  const dose = {
+    outbound: cruiseRate * outbound,
+    surface: MARS_SURFACE_DOSE_RATE * surfaceStay,
+    return: cruiseRate * returnTime,
+    events: eventSummary.extraDose,
+  };
+  dose.total = dose.outbound + dose.surface + dose.return + dose.events;
+  dose.careerFraction = dose.total / CAREER_DOSE_LIMIT;
+
+  const result = {
+    schemaVersion: MISSION_SCHEMA_VERSION,
+    inputs: inputsSummary(ctx),
     vehicleId: vehicle.id,
+    launchVehicleId: launchVehicle.id,
+    windowId: ctx.windowId,
+    vehicle: vehicleSummary(vehicle),
+    launchVehicle: launchVehicleSummary(launchVehicle),
     feasible: true,
     infeasibleReason: null,
-    transferChoice,
-    departureDate: w.departureDate,
-    arrivalDate: w.arrivalDate,
+    transferChoice: inputsSummary(ctx).transferChoice,
+    departureDate: w.departureDate.toISOString(),
+    arrivalDate: w.arrivalDate.toISOString(),
     transitTime: outbound,
     hohmannTransitTime: hohmann.w.timeOfFlight,
     transferAngle: w.transferAngle,
@@ -365,6 +412,7 @@ function buildResult({ vehicle, transferChoice, chosen, hohmann, crewSize, margi
       capability: chosen.capability,
       reserve: chosen.capability - chosen.total,
       margin,
+      hohmannTotal: hohmann.total,
     },
     mass: {
       habitat: chosen.payload.habitat,
@@ -375,31 +423,59 @@ function buildResult({ vehicle, transferChoice, chosen, hohmann, crewSize, margi
       dry: chosen.dry,
       propellant: chosen.propellant,
       initialMassInLEO,
+      hohmannPropellant: hohmann.propellant,
     },
     launches,
-    cost: { hardware: vehicle.hardwareCost, launches: launchCost, total: vehicle.hardwareCost + launchCost },
-    dose,
+    launchPlan: {
+      launchVehicleId: launchVehicle.id,
+      capacityPerLaunch: launchVehicle.payloadLeoKg,
+      crewedLaunches: 1,
+      uncrewedLaunches: launches - 1,
+      expectedReflights: success.recoverable.expectedReflights,
+      expectedLaunches: launches + success.recoverable.expectedReflights,
+      reflightDelayDays: success.recoverable.delayDays,
+    },
+    cost: {
+      hardware: vehicle.hardwareCost,
+      launches: launchCost,
+      reflightReserve: success.recoverable.costPenaltyUsd,
+      total: vehicle.hardwareCost + launchCost + success.recoverable.costPenaltyUsd,
+    },
     duration: { outbound, surfaceStay, return: returnTime, total: totalDuration },
-    consumablesPerCrewDay: CREW_PAYLOAD.consumablesPerCrewDay,
-    missionConsumablesMass: CREW_PAYLOAD.consumablesPerCrewDay * crewSize * (totalDuration / DAY),
-    success: successEstimate({ vehicle, launches, burns, margin }),
-    crewHealthIndex: crewHealthIndex({ missionDose: dose.mission, microgravityTime: outbound + returnTime }),
+    dose,
+    lifeSupport: lifeSupportMass({ crewSize, outboundTime: outbound, surfaceTime: surfaceStay, returnTime, closure }),
+    success: { probability: success.probability, recoverable: success.recoverable },
+    successFactors: success.factors,
+    crewHealthIndex: crewHealthIndex({ missionDose: dose.total, microgravityTime: outbound + returnTime }),
+    events,
+    eventSummary,
   };
+  result.score = scoreMission(result, { bestWindowId: BEST_WINDOW_ID });
+  return result;
 }
 
-function infeasibleResult(vehicle, transferChoice, hohmann, reason, attempted) {
+function infeasibleResult(ctx, hohmann, reason, attempted) {
   const w = attempted?.w ?? hohmann.w;
   return {
-    vehicleId: vehicle.id,
+    schemaVersion: MISSION_SCHEMA_VERSION,
+    inputs: inputsSummary(ctx),
+    vehicleId: ctx.vehicle.id,
+    launchVehicleId: ctx.launchVehicle.id,
+    windowId: ctx.windowId,
+    vehicle: vehicleSummary(ctx.vehicle),
+    launchVehicle: launchVehicleSummary(ctx.launchVehicle),
     feasible: false,
     infeasibleReason: reason,
-    transferChoice,
-    departureDate: w.departureDate,
-    arrivalDate: w.arrivalDate,
+    transferChoice: inputsSummary(ctx).transferChoice,
+    departureDate: w.departureDate.toISOString(),
+    arrivalDate: w.arrivalDate.toISOString(),
     transitTime: null,
     hohmannTransitTime: hohmann.w.timeOfFlight,
     deltaV: attempted
       ? { departure: attempted.departure, capture: attempted.capture, total: attempted.total, capability: attempted.capability }
       : null,
+    successFactors: [],
+    events: [],
+    score: scoreMission(null),
   };
 }

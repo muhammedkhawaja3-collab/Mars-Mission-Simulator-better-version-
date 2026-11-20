@@ -53,6 +53,33 @@ describe('App wired to the physics engine', () => {
     expect(new Set(transits).size).toBe(1);
   });
 
+  it('has a launch-vehicle selector and fixed window ids; Starship keeps its own launcher', () => {
+    const lv = container.querySelector('#launch-vehicle');
+    const win = container.querySelector('#launch-window');
+    expect([...lv.options].map(o => o.value)).toEqual(['starship', 'sls-block1', 'sls-block2', 'falcon-heavy', 'new-glenn']);
+    expect([...win.options].map(o => o.value)).toEqual(['2026-11', '2028-12', '2031-01', '2033-03', '2035-07']);
+    expect(win.value).toBe('2028-12');
+    expect(container.textContent).toContain('2029 window');
+    const launches = () => [...container.querySelectorAll('.rocket-card .csg-item')]
+      .filter(el => el.querySelector('.csg-l')?.textContent === 'LAUNCHES')
+      .map(el => el.querySelector('.csg-v').textContent);
+    const before = launches();
+    act(() => {
+      lv.value = 'new-glenn';
+      lv.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const after = launches();
+    expect(after[0]).not.toBe(before[0]); // chemical stack needs more 45 t launches
+    expect(after[2]).toBe(before[2]); // Starship stage still flies on Starship
+    expect(container.textContent).not.toMatch(/bone loss/i);
+  });
+
+  it('explains the success estimate with factors', () => {
+    expect(container.querySelectorAll('.success-factors').length).toBe(3);
+    expect(container.textContent).toMatch(/Why [\d.]+% success\?/);
+    expect(container.textContent).toContain('Crewed launch');
+  });
+
   it('runs launch → race → debrief and shows generated trade-off insights', async () => {
     click(findButton(container, 'INITIATE LAUNCH SEQUENCE'));
     await act(async () => { await Promise.resolve(); }); // let the (rejected) API call settle

@@ -10,7 +10,7 @@
  */
 export const TRADEOFF_METRICS = Object.freeze([
   { key: 'transitTime', label: 'transit time', better: 'lower', get: (m) => m.transitTime },
-  { key: 'missionDose', label: 'total mission radiation dose', better: 'lower', get: (m) => m.dose.mission },
+  { key: 'missionDose', label: 'total mission radiation dose', better: 'lower', get: (m) => m.dose.total },
   { key: 'initialMassInLEO', label: 'mass in low Earth orbit', better: 'lower', get: (m) => m.mass.initialMassInLEO },
   { key: 'launches', label: 'number of launches', better: 'lower', get: (m) => m.launches },
   { key: 'cost', label: 'transportation cost', better: 'lower', get: (m) => m.cost.total },
